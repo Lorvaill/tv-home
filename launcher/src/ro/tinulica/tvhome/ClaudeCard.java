@@ -105,7 +105,7 @@ final class ClaudeCard extends FrameLayout {
         wlp.leftMargin = px(7);
         head.addView(who, wlp);
         TextView now = text(context, 10.5f, false);
-        now.setText("acum");
+        now.setText("maintenant");
         now.setAlpha(0.7f);
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
         nlp.leftMargin = px(14);
@@ -187,7 +187,7 @@ final class ClaudeCard extends FrameLayout {
                 code.setClipToOutline(true);
                 phone.addView(code, new LinearLayout.LayoutParams(px(88), px(88)));
                 TextView hint = text(context, 9.5f, false);
-                hint.setText("de pe telefon");
+                hint.setText("depuis le téléphone");
                 hint.setAlpha(0.8f);
                 LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
                 tlp.topMargin = px(4);

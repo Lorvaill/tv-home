@@ -160,10 +160,10 @@ final class SleepClock extends View {
         text.setTextSize(11 * dp);
         text.setColor(0xD9FFFFFF);
         float ty = wy + 2.5f * row + 16 * dp;
-        canvas.drawText(t("Se oprește peste ", "Turns off in ") + span, cx, ty, text);
+        canvas.drawText("S'éteint dans " + span, cx, ty, text);
         text.setTextSize(9 * dp);
         text.setColor(0x80FFFFFF);
-        canvas.drawText(t("↑ ↓ alegi   ← → ore / minute   OK pornește", "↑ ↓ choose   ← → hours / minutes   OK starts"),
+        canvas.drawText("↑ ↓ choisir   ← → heures / minutes   OK démarrer",
                 cx, ty + 14 * dp, text);
         removeCallbacks(tick);
         postDelayed(tick, 15_000); // the arc follows the time

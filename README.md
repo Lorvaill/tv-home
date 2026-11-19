@@ -5,7 +5,7 @@ previews from your apps, a Control Center, search across your streaming apps, a 
 helps you choose a film, weather and warning notices, messages and questions from your computer
 (made for an AI assistant working while you watch), and a small tool that cleans up the TV.
 
-[Română](README.ro.md)
+[Română](README.ro.md) · [Français — ce fork](README.fr.md)
 
 ![The home screen](docs/images/home.jpg)
 

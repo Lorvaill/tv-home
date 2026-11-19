@@ -115,7 +115,7 @@ public class GlassBench extends Activity {
         private final long[] times = new long[2000];
         private final StringBuilder report = new StringBuilder();
         // stage: covered fraction of the screen by glass
-        private final String[] names = {"doar fundal", "sticlă 10% (bara)", "sticlă 30% (bara + Control Center)", "sticlă 100%"};
+        private final String[] names = {"fond seul", "verre 10 % (dock)", "verre 30 % (dock + Control Center)", "verre 100 %"};
 
         @Override
         public void onSurfaceCreated(GL10 gl, EGLConfig config) {
@@ -135,7 +135,7 @@ public class GlassBench extends Activity {
             w = width;
             h = height;
             GLES20.glViewport(0, 0, w, h);
-            report.append(String.format(Locale.ROOT, "Suprafață: %dx%d%n", w, h));
+            report.append(String.format(Locale.ROOT, "Surface : %dx%d%n", w, h));
             stageStart = SystemClock.elapsedRealtime();
         }
 

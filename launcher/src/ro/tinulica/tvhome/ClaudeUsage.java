@@ -70,7 +70,7 @@ final class ClaudeUsage extends LinearLayout {
                     java.nio.charset.StandardCharsets.UTF_8));
             int used = Math.max(0, Math.min(100, o.optInt("percent", 0)));
             String resets = o.optString("resets", "");
-            label.setText("Claude  ·  " + used + "% folosit" + (resets.isEmpty() ? "" : "  ·  " + resets));
+            label.setText("Claude  ·  " + used + " % utilisé" + (resets.isEmpty() ? "" : "  ·  " + resets));
             bar.set(used / 100f);
             setVisibility(VISIBLE);
             return true;

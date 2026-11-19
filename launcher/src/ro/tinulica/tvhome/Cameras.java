@@ -96,7 +96,7 @@ final class Cameras extends FrameLayout {
             name.setPadding(px(14), px(10), px(14), px(10));
             cell.addView(name, new LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
             TextView status = new TextView(context);
-            status.setText("Se conectează…");
+            status.setText("Connexion…");
             status.setTextColor(0xB3FFFFFF);
             status.setTextSize(12);
             status.setTag("status");
@@ -174,7 +174,7 @@ final class Cameras extends FrameLayout {
                 TextView s = cells.get(index).findViewWithTag("status");
                 if (s != null) {
                     s.setVisibility(VISIBLE);
-                    s.setText("Fără semnal (" + what + "/" + extra + ")");
+                    s.setText("Pas de signal (" + what + "/" + extra + ")");
                 }
                 return true;
             });
@@ -183,7 +183,7 @@ final class Cameras extends FrameLayout {
         } catch (Exception e) {
             TextView s = cells.get(index).findViewWithTag("status");
             if (s != null) {
-                s.setText("Adresă invalidă");
+                s.setText("Adresse invalide");
             }
         }
     }

@@ -116,11 +116,14 @@ final class Tmdb {
         if (path == null || path.isEmpty() || "null".equals(path)) {
             return null;
         }
-        File f = new File(context.getCacheDir(), "tmdb-img/" + size + path.replace('/', '_'));
+        // A full address (Plex's pictures for Cinema on the Plex library) is fetched as it is.
+        boolean full = path.startsWith("http");
+        File f = new File(context.getCacheDir(), "tmdb-img/" + size
+                + (full ? "_u" + Integer.toHexString(path.hashCode()) : path.replace('/', '_')));
         if (!f.exists()) {
             HttpURLConnection c = null;
             try {
-                c = (HttpURLConnection) new URL(IMAGES + size + path).openConnection();
+                c = (HttpURLConnection) new URL(full ? path : IMAGES + size + path).openConnection();
                 c.setConnectTimeout(8000);
                 c.setReadTimeout(15000);
                 if (c.getResponseCode() != 200) {

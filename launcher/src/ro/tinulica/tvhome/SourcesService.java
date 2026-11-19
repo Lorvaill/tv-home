@@ -88,8 +88,8 @@ public final class SourcesService extends AccessibilityService {
                     Weather.Alert a = new Weather.Alert();
                     a.level = level;
                     a.type = intent.getIntExtra("type", 1);
-                    a.headline = "Intensificări ale vântului cu viteze de 50...70 km/h și izolat de peste 80 km/h.";
-                    a.area = "București";
+                    a.headline = "Rafales de vent de 50 à 70 km/h, localement plus de 80 km/h.";
+                    a.area = "Paris";
                     a.expires = System.currentTimeMillis() + 20 * 3600_000L;
                     showAlert(a);
                 } else {
@@ -100,7 +100,7 @@ public final class SourcesService extends AccessibilityService {
                     n.temp = sky == WeatherCard.SNOW ? -2 : sky == WeatherCard.HEAT ? 36 : 14;
                     n.high = n.temp + 4;
                     n.low = n.temp - 5;
-                    n.city = "București";
+                    n.city = "Paris";
                     showWeather(n, intent.getIntExtra("was", -1));
                 }
             } else if ("ro.tinulica.tvhome.TEST_HOLD".equals(intent.getAction())) {
@@ -113,8 +113,8 @@ public final class SourcesService extends AccessibilityService {
             } else if ("ro.tinulica.tvhome.TEST_WAKE".equals(intent.getAction())) {
                 wakeIntro();
             } else if ("ro.tinulica.tvhome.TEST_NOTICE".equals(intent.getAction())) {
-                showNotice("Magazin Google Play", getApplicationInfo().loadIcon(getPackageManager()),
-                        "Netflix a fost actualizat", "Versiunea nouă aduce subtitrări mai clare și redare mai rapidă.");
+                showNotice("Google Play Store", getApplicationInfo().loadIcon(getPackageManager()),
+                        "Netflix a été mis à jour", "La nouvelle version apporte des sous-titres plus nets et une lecture plus rapide.");
             } else if ("ro.tinulica.tvhome.TEST_VOLUME".equals(intent.getAction())) {
                 volumeKey = intent.getIntExtra("key", KeyEvent.KEYCODE_VOLUME_UP);
                 volumeStep();
@@ -351,7 +351,7 @@ public final class SourcesService extends AccessibilityService {
         TextView source = text(9, false);
         source.setIncludeFontPadding(false);
         source.setAlpha(0.7f);
-        source.setText(app + "  ·  " + t("acum", "now"));
+        source.setText(app + "  ·  " + "maintenant");
         words.addView(source);
         TextView head = text(12.5f, true);
         head.setIncludeFontPadding(false);
@@ -885,7 +885,7 @@ public final class SourcesService extends AccessibilityService {
             words.setOrientation(LinearLayout.VERTICAL);
             TextView head = text(12.5f, true);
             head.setIncludeFontPadding(false);
-            head.setText("Mod Cinema");
+            head.setText("Mode Cinéma");
             words.addView(head);
             TextView body = text(10.5f, false);
             body.setIncludeFontPadding(false);
@@ -948,8 +948,8 @@ public final class SourcesService extends AccessibilityService {
 
     /** A minute before: a night sky behind the glass, and how to keep the TV on. */
     private void warnSleep() {
-        showDrop(new WeatherCard(this, dp, null, t("Televizorul se oprește într-un minut", "The TV turns off in a minute"),
-                        t("Control Center › Somn, ca să rămână pornit", "Control Center › Sleep to keep it on")),
+        showDrop(new WeatherCard(this, dp, null, "La TV s'éteint dans une minute",
+                        "Control Center › Veille, pour la garder allumée"),
                 new WeatherCard.Scene(WeatherCard.MOON, false, 0, dp), px(300), px(54), "notice.ogg", 12000, true);
     }
 
@@ -1126,24 +1126,36 @@ public final class SourcesService extends AccessibilityService {
         if (CinemaActivity.alive || (power != null && !power.isInteractive())) {
             return; // Cinema mode or the screen off: they wait for the next check
         }
-        java.util.Set<String> seen = new java.util.LinkedHashSet<>(prefs.getStringSet("alerts_seen",
+        // One warning is known by its kind and colour, not by the bulletin's id: Météo-France
+        // reissues the same orange wind warning several times (updates, one entry per period),
+        // which used to show it twice or more. It is shown again only after it ended and came back.
+        java.util.Set<String> seen = new java.util.HashSet<>(prefs.getStringSet("alerts_seen2",
                 new java.util.HashSet<String>()));
+        java.util.Set<String> current = new java.util.HashSet<>();
         long delay = 0;
         boolean quiet = quiet(this) && !force;
         for (final Weather.Alert a : alerts) {
+            String key = a.type + ":" + a.level;
+            if (!current.add(key)) {
+                continue; // the same warning twice in this feed
+            }
             if (quiet && a.level < 4) {
+                current.remove(key);
                 continue; // Do Not Disturb: shown once it is switched off, if still in force
             }
-            if (seen.add(a.id) || force) {
+            if (!seen.contains(key) || force) {
                 final long at = delay;
                 handler.postDelayed(() -> showAlert(a), at);
                 delay += 2500;
             }
         }
-        while (seen.size() > 40) {
-            seen.remove(seen.iterator().next());
+        if (!quiet) {
+            prefs.edit().putStringSet("alerts_seen2", current).apply();
+        } else {
+            seen.addAll(current);
+            seen.retainAll(keysOf(alerts));
+            prefs.edit().putStringSet("alerts_seen2", seen).apply();
         }
-        prefs.edit().putStringSet("alerts_seen", seen).apply();
         if (now != null) {
             // Shown when the TV is switched on (not again within 20 minutes), and whenever the
             // sky changes: clear, cloudy, fog, rain, snow, storm.
@@ -1197,6 +1209,25 @@ public final class SourcesService extends AccessibilityService {
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         int rest = column.getMeasuredHeight() + px(12) - px(54);
         showDrop(column, scene, px(300), px(54), "notice.ogg", 12000 + 2500L * tasks.size(), false, px(24), rest);
+    }
+
+    /** TCL's quick settings panel (picture mode, sound, sleep…), drawn over whatever is playing. */
+    private void quickSettings() {
+        try {
+            startService(new Intent("com.tcl.settings.SHOW_WINDOW")
+                    .setClassName("com.android.tv.settings", "com.tcl.settings.ShowWindowService")
+                    .putExtra("Type", "quicksettings"));
+        } catch (RuntimeException e) {
+            android.util.Log.i("TVHome", "quick settings refused: " + e);
+        }
+    }
+
+    private static java.util.Set<String> keysOf(List<Weather.Alert> alerts) {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        for (Weather.Alert a : alerts) {
+            keys.add(a.type + ":" + a.level);
+        }
+        return keys;
     }
 
     private void showAlert(Weather.Alert a) {
@@ -1785,6 +1816,13 @@ public final class SourcesService extends AccessibilityService {
         dp = getResources().getDisplayMetrics().density;
         sounds = new SettingsActivity.Sounds(this, getSharedPreferences("home", MODE_PRIVATE));
         wakeCheck = true;
+        // Already on an input when the service (re)starts: keep the screen awake from now.
+        handler.postDelayed(() -> {
+            android.view.accessibility.AccessibilityNodeInfo top = getRootInActiveWindow();
+            if (watchingInput == null && top != null && top.getPackageName() != null) {
+                sleepPolicy(top.getPackageName().toString(), "Activity");
+            }
+        }, 1500);
         handler.postDelayed(weatherTick, 25_000);
         planSleep();
         if (android.os.SystemClock.elapsedRealtime() < 4 * 60_000L) {
@@ -1899,6 +1937,67 @@ public final class SourcesService extends AccessibilityService {
         super.onDestroy();
     }
 
+    /** Inactivity sleep (Android's "attentive timeout"): none while a device on HDMI or the aerial is
+     *  on screen (someone is watching or playing; with no signal the TV's own no-signal power-off
+     *  still applies), one hour everywhere else. */
+    private static final long SLEEP_APPS_MS = 60 * 60_000L;
+    private Boolean watchingInput;
+
+    private void sleepPolicy(String pkg, String cls) {
+        if (!cls.endsWith("Activity")) {
+            return;   // dialogs, toasts and our own overlays do not change what is on screen
+        }
+        boolean input = "com.tcl.tv".equals(pkg) || "com.tcl.tvinput".equals(pkg)
+                || (getPackageName().equals(pkg) && (cls.endsWith("SourceActivity") || cls.endsWith("ChannelActivity")));
+        if (watchingInput != null && watchingInput == input) {
+            return;
+        }
+        watchingInput = input;
+        try {
+            android.provider.Settings.Secure.putLong(getContentResolver(), "attentive_timeout",
+                    input ? -1 : SLEEP_APPS_MS);
+        } catch (RuntimeException e) {
+            // No WRITE_SECURE_SETTINGS: the TV keeps its own setting.
+        }
+        keepAwake(input);
+    }
+
+    /** A game console or a box on HDMI is not the remote: nothing tells the TV someone is there,
+     *  so after the screen timeout the screen saver came up in the middle of a game. While an input
+     *  is on screen an invisible pixel asks for the screen to stay on (TCL's own power-off when
+     *  there is no signal still applies). */
+    private View awake;
+
+    private void keepAwake(boolean on) {
+        android.view.WindowManager wm = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
+        if (wm == null) {
+            return;
+        }
+        if (on && awake == null) {
+            View v = new View(this);
+            android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(1, 1,
+                    android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+            try {
+                wm.addView(v, lp);
+                awake = v;
+            } catch (RuntimeException e) {
+                android.util.Log.w("TVHome", "keep awake: " + e);
+            }
+        } else if (!on && awake != null) {
+            try {
+                wm.removeView(awake);
+            } catch (RuntimeException ignored) {
+                // Already gone.
+            }
+            awake = null;
+        }
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getPackageName() != null && pendingPkg != null && pendingPkg.contentEquals(event.getPackageName())) {
@@ -1909,6 +2008,7 @@ public final class SourcesService extends AccessibilityService {
         }
         String pkg = event.getPackageName().toString();
         String cls = event.getClassName() != null ? event.getClassName().toString() : "";
+        sleepPolicy(pkg, cls);
         if ("com.tcl.suspension".equals(pkg) && !homeInFront) {
             // TCL's input panel came up (the Source key, however it arrived): close it and show
             // ours instead. On the home screen the launcher handles Source (Control Center).
@@ -1948,6 +2048,15 @@ public final class SourcesService extends AccessibilityService {
                 || pkg.equals("com.tcl.suspension") || pkg.equals("android")) {
             return; // panels and dialogs over the same app
         }
+        if ("com.android.tv.settings".equals(pkg) && cls.endsWith(".MainSettings") && !homeInFront
+                && frontPkg != null && !"com.android.tv.settings".equals(frontPkg)) {
+            // The Settings key over an app or an input: TCL's system opens the full-screen
+            // settings before any app sees the key. Close them and draw TCL's quick panel over the
+            // programme instead, as it was with Google TV's launcher.
+            handler.postDelayed(() -> performGlobalAction(GLOBAL_ACTION_BACK), 40);
+            handler.postDelayed(this::quickSettings, 280);
+            return;
+        }
         homeInFront = false;
         frontPkg = pkg;
         volumeSession(false);
@@ -1983,7 +2092,7 @@ public final class SourcesService extends AccessibilityService {
     private boolean resent;
     private long lastLook;
     private static final java.util.regex.Pattern GATE = java.util.regex.Pattern.compile(
-            "(?i)cine (se )?(uit|prive)|who.?s watching|alege(ți)? (un |profilul)|choose (a |your )?profile|profiluri|profiles");
+            "(?i)qui regarde|choisi(r|ssez|s) (un |votre |ton )?profil|cine (se )?(uit|prive)|who.?s watching|alege(ți)? (un |profilul)|choose (a |your )?profile|profiluri|profiles");
 
     /** Called by Cinema after it opened `intent` (a title's page) in `pkg`. */
     static void titleOpened(Context context, String pkg, Intent intent) {
@@ -2113,6 +2222,17 @@ public final class SourcesService extends AccessibilityService {
         lastUserAt = android.os.SystemClock.uptimeMillis();
         if (pendingPkg != null) {
             titleKey(event);
+        }
+        // The microphone button: our own voice bubble (Google's assistant is gone).
+        if (vk == KeyEvent.KEYCODE_SEARCH || vk == KeyEvent.KEYCODE_VOICE_ASSIST || vk == KeyEvent.KEYCODE_ASSIST) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                try {
+                    startActivity(new Intent(this, VoiceActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (RuntimeException e) {
+                    android.util.Log.w("TVHome", "voice: " + e);
+                }
+            }
+            return true;
         }
         if (vk == KeyEvent.KEYCODE_VOLUME_UP || vk == KeyEvent.KEYCODE_VOLUME_DOWN
                 || vk == KeyEvent.KEYCODE_VOLUME_MUTE) {
@@ -2395,7 +2515,7 @@ public final class SourcesService extends AccessibilityService {
         column.setClipChildren(false);
         column.setClipToPadding(false);
         TextView title = text(18, true);
-        title.setText(t("Aplicații deschise recent", "Recent apps"));
+        title.setText("Applications récentes");
         title.setPadding(0, 0, 0, px(22));
         column.addView(title, new LinearLayout.LayoutParams(-2, -2));
 
@@ -2426,7 +2546,7 @@ public final class SourcesService extends AccessibilityService {
         if (apps.isEmpty()) {
             TextView none = text(13, false);
             none.setAlpha(0.7f);
-            none.setText(t("Nicio aplicație folosită recent", "No recent apps"));
+            none.setText("Aucune application récente");
             row.addView(none);
         }
         row.setPadding(0, px(18), 0, px(40));
@@ -2714,7 +2834,7 @@ public final class SourcesService extends AccessibilityService {
                 return;
             }
             android.view.accessibility.AccessibilityNodeInfo row = byText(root, "android:id/title",
-                    "Opriți forțat", "Oprire forțată", "Force stop");
+                    "Forcer l'arrêt", "Forcer l’arrêt", "Arrêter de force", "Opriți forțat", "Oprire forțată", "Force stop");
             if (row == null) {
                 handler.postDelayed(this::stepStop, 250);
                 return;
@@ -2730,7 +2850,7 @@ public final class SourcesService extends AccessibilityService {
         } else if (stopStep == 1) {
             // The confirmation for this app: title "Force stop", breadcrumb the app's name.
             boolean confirm = byText(root, "com.android.tv.settings:id/guidance_title",
-                    "Opriți forțat", "Oprire forțată", "Force stop") != null
+                    "Forcer l'arrêt", "Forcer l’arrêt", "Arrêter de force", "Opriți forțat", "Oprire forțată", "Force stop") != null
                     && hasText(root, "com.android.tv.settings:id/guidance_breadcrumb", stoppingLabel);
             android.view.accessibility.AccessibilityNodeInfo ok = confirm ? byText(root,
                     "com.android.tv.settings:id/guidedactions_item_title", "OK") : null;
@@ -2856,7 +2976,7 @@ public final class SourcesService extends AccessibilityService {
             cover.setBackgroundColor(0xFF0B0B0D);
         }
         TextView label = text(13, true);
-        label.setText("Se închide " + (stoppingLabel != null ? stoppingLabel : "aplicația") + "…");
+        label.setText("Fermeture de " + (stoppingLabel != null ? stoppingLabel : "l'application") + "…");
         label.setGravity(Gravity.CENTER);
         label.setPadding(px(18), 0, px(18), 0);
         label.setBackground(new GlassDrawable(px(17), dp, 0x59202226));
@@ -3005,16 +3125,16 @@ public final class SourcesService extends AccessibilityService {
         list.setClipChildren(false);
         list.setClipToPadding(false);
         TextView title = text(17, true);
-        title.setText(t("Surse", "Inputs"));
+        title.setText("Sources");
         title.setPadding(px(6), 0, 0, px(10));
         list.addView(title);
 
         View first = null;
         for (final TvInputInfo info : passthrough()) {
             int state = inputs.getInputState(info.getId());
-            String detail = state == TvInputManager.INPUT_STATE_CONNECTED ? t("Pornit", "On")
-                    : state == TvInputManager.INPUT_STATE_CONNECTED_STANDBY ? t("În așteptare", "Standby")
-                    : t("Neconectat", "Not connected");
+            String detail = state == TvInputManager.INPUT_STATE_CONNECTED ? "Activé"
+                    : state == TvInputManager.INPUT_STATE_CONNECTED_STANDBY ? "En veille"
+                    : "Non connecté";
             View row = row("hdmi", label(info), detail, () -> openInput(info.getId()));
             list.addView(row, rowParams());
             if (first == null || state == TvInputManager.INPUT_STATE_CONNECTED && first.getTag() == null) {
@@ -3028,9 +3148,9 @@ public final class SourcesService extends AccessibilityService {
         }
         if (getPackageManager().getLaunchIntentForPackage(LIVE_TV) != null
                 || getPackageManager().getLeanbackLaunchIntentForPackage(LIVE_TV) != null) {
-            list.addView(row("antenna", t("Antenă", "Antenna"), "Live TV", this::openAntenna), rowParams());
+            list.addView(row("antenna", "Antenne", "Live TV", this::openAntenna), rowParams());
         }
-        list.addView(row("house", t("Ecran principal", "Home screen"), "", this::openHome), rowParams());
+        list.addView(row("house", "Écran d'accueil", "", this::openHome), rowParams());
 
         // Room on both sides so a focused row (slightly larger) is never cut.
         list.setPadding(px(10), px(6), px(10), px(6));
@@ -3264,12 +3384,12 @@ public final class SourcesService extends AccessibilityService {
         question.setSingleLine(false);
         question.setMaxLines(2);
         question.setAlpha(0.75f);
-        question.setText(t("S-a pornit. Treci pe această sursă?", "Turned on. Switch to this input?"));
+        question.setText("Appareil allumé. Passer sur cette source ?");
         side.addView(question);
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
-        View open = button(t("Deschide", "Open"), () -> openInput(info.getId()));
-        View later = button(t("Nu acum", "Not now"), this::hideCard);
+        View open = button("Ouvrir", () -> openInput(info.getId()));
+        View later = button("Pas maintenant", this::hideCard);
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-2, px(28));
         blp.rightMargin = px(8);
         buttons.addView(open, blp);

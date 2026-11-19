@@ -83,7 +83,10 @@ final class Previews {
     private long loadedAt;
     private boolean loaded;
 
+    private final Context appContext;
+
     Previews(Context context) {
+        appContext = context.getApplicationContext();
         resolver = context.getContentResolver();
         File dir = context.getExternalFilesDir(null);
         logFile = dir != null ? new File(dir, "previews.log") : null;
@@ -98,6 +101,7 @@ final class Previews {
 
     /** Diagnostic line in files/previews.log (adb can read it; logcat on some TVs cannot). */
     void note(String line) {
+        line = line.replaceAll("X-Plex-Token=[^&\\s]+", "X-Plex-Token=***");   // never in a log
         android.util.Log.d("TVHome", line);
         if (logFile == null) {
             return;
@@ -220,11 +224,23 @@ final class Previews {
             note("watch_next: " + e);
         }
         Collections.sort(next, (a, b) -> Long.compare(b.weight, a.weight));
+        // Once signed in, Plex publishes its own small thumbnails: the server's posters replace them.
+        boolean plexServer = PlexSource.configured(appContext);
         for (Item item : next) {
-            group(item);
+            if (!(plexServer && PlexSource.PKG.equals(item.pkg))) {
+                group(item);
+            }
         }
         for (Item item : programs) {
-            group(item);
+            if (!(plexServer && PlexSource.PKG.equals(item.pkg))) {
+                group(item);
+            }
+        }
+        // Plex shares nothing with the TV's home-screen provider: its server is asked directly.
+        if (PlexSource.configured(appContext)) {
+            for (Item item : PlexSource.load(appContext)) {
+                group(item);
+            }
         }
         loadedAt = SystemClock.elapsedRealtime();
         loaded = true;
@@ -257,6 +273,15 @@ final class Previews {
     }
 
     private void group(Item item) {
+        // TF1+ only gives tiny thumbnails: no cards for it.
+        if ("fr.tf1.mytf1".equals(item.pkg)) {
+            return;
+        }
+        // Spotify publishes recently played tracks, albums and playlists mixed: keep the playlists.
+        if ("com.spotify.tv.android".equals(item.pkg)
+                && (item.intentUri == null || !item.intentUri.contains("/playlist/"))) {
+            return;
+        }
         List<Item> list = byPackage.get(item.pkg);
         if (list == null) {
             list = new ArrayList<>();
@@ -315,14 +340,30 @@ final class Previews {
      * under a predictable name. Falls back to the thumbnail when the big one does not exist.
      */
     Bitmap bigPoster(String uri, int targetW, int targetH) {
+        if (uri != null && uri.startsWith("plexcombo:")) {
+            // Full screen: the same scene, with the logo raised above the dock.
+            return poster("plexcombo-hero:" + uri.substring("plexcombo:".length()), targetW, targetH);
+        }
         String big = highRes(uri);
         if (!big.equals(uri)) {
             Bitmap bitmap = poster(big, targetW, targetH);
-            if (bitmap != null) {
+            if (bitmap != null && !tooSmall(big)) {
                 return bitmap;
             }
         }
-        return poster(uri, targetW, targetH);
+        Bitmap bitmap = poster(uri, targetW, targetH);
+        // A thumbnail blown up to the whole screen looks smeared (TF1+ gives 389 px, Spotify 640 px):
+        // better no banner at all, the wallpaper and the title stay sharp.
+        return tooSmall(uri) ? null : bitmap;
+    }
+
+    /** Width of each picture as the service sent it, before any scaling. */
+    private final Map<String, Integer> sourceWidth = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int MIN_BANNER_WIDTH = 720;
+
+    private boolean tooSmall(String uri) {
+        Integer w = sourceWidth.get(uri);
+        return w != null && w > 0 && w < MIN_BANNER_WIDTH;
     }
 
     static String highRes(String uri) {
@@ -352,6 +393,9 @@ final class Previews {
     }
 
     private Bitmap fetch(String uri, int targetW, int targetH) {
+        if (uri.startsWith("plexcombo:") || uri.startsWith("plexcombo-hero:")) {
+            return combo(uri, targetW, targetH);
+        }
         try {
             byte[] bytes = read(uri);
             if (bytes == null) {
@@ -360,6 +404,7 @@ final class Previews {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+            sourceWidth.put(uri, bounds.outWidth);
             int sample = 1;
             while (bounds.outWidth / (sample * 2) >= targetW && bounds.outHeight / (sample * 2) >= targetH) {
                 sample *= 2;
@@ -376,6 +421,58 @@ final class Previews {
         } catch (Exception | OutOfMemoryError e) {
             note("poster " + uri + ": " + e);
             return null;
+        }
+    }
+
+    /**
+     * "plexcombo:<scene>|<logo>": the scene with the title's logo laid over its lower left, the way
+     * the Apple TV app shows titles. A soft shade under the logo keeps it readable on bright scenes.
+     */
+    private Bitmap combo(String uri, int targetW, int targetH) {
+        boolean hero = uri.startsWith("plexcombo-hero:");
+        String[] parts = uri.substring(uri.indexOf(':') + 1).split("\\|", 2);
+        Bitmap scene = fetch(parts[0], targetW, targetH);
+        if (scene == null || parts.length < 2) {
+            return scene;
+        }
+        Integer w = sourceWidth.get(parts[0]);
+        if (w != null) {
+            sourceWidth.put(uri, w);
+        }
+        try {
+            byte[] bytes = read(parts[1]);
+            Bitmap logo = bytes != null ? BitmapFactory.decodeByteArray(bytes, 0, bytes.length) : null;
+            if (logo == null) {
+                return scene;
+            }
+            Bitmap out = scene.isMutable() ? scene : scene.copy(Bitmap.Config.ARGB_8888, true);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(out);
+            int sw = out.getWidth();
+            int sh = out.getHeight();
+            // Shade: dark at the bottom left, fading up and to the right.
+            android.graphics.Paint shade = new android.graphics.Paint();
+            // Full screen, the dock covers the lowest quarter: the logo sits above it (bottom at 68%).
+            float bottom = hero ? sh * 0.68f : sh * 0.92f;
+            shade.setShader(new android.graphics.RadialGradient(sw * 0.18f, bottom, sw * 0.62f,
+                    0x99000000, 0x00000000, android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, sw, sh, shade);
+            // Logo: at most 40% of the width (32% full screen) and 26% of the height, 6% in from the left.
+            float scale = Math.min(sw * (hero ? 0.32f : 0.40f) / logo.getWidth(), sh * (hero ? 0.20f : 0.26f) / logo.getHeight());
+            float lw = logo.getWidth() * scale;
+            float lh = logo.getHeight() * scale;
+            float left = sw * 0.06f;
+            float top = bottom - lh;
+            android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG
+                    | android.graphics.Paint.ANTI_ALIAS_FLAG);
+            canvas.drawBitmap(logo, null, new android.graphics.RectF(left, top, left + lw, top + lh), p);
+            logo.recycle();
+            if (out != scene) {
+                scene.recycle();
+            }
+            return out;
+        } catch (Exception | OutOfMemoryError e) {
+            note("logo " + e);
+            return scene;
         }
     }
 

@@ -111,7 +111,9 @@ public class MainActivity extends Activity {
     /** Never shown as tiles: system helpers, and Live TV apps (they are under "Surse"). */
     private static final Set<String> HIDDEN = new HashSet<>(Arrays.asList(
             "com.tcl.tv", "com.tcl.suspension", "com.tcl.t_solo", "com.tcl.dashboard",
-            "com.android.tv.settings", "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx"));
+            "com.android.tv.settings", "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx",
+            // Updates install on their own; the store stays one press away in Control Center.
+            "com.android.vending"));
     private static final List<String> LIVE_TV = Arrays.asList(
             "com.tcl.tv", "com.mediatek.wwtv.tvcenter", "com.google.android.tv", "com.sony.dtv.tvx");
     private static final String INPUT_PICKER = "com.tcl.suspension";
@@ -421,6 +423,20 @@ public class MainActivity extends Activity {
             return;
         }
         try {
+            // TCL's blocker also drops notification access on a cold start: the music card needs it.
+            String listener = getPackageName() + "/" + NoticeListener.class.getName();
+            String listeners = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+            if (listeners == null || "null".equals(listeners)) {
+                listeners = "";
+            }
+            if (!(":" + listeners + ":").contains(":" + listener + ":")) {
+                Settings.Secure.putString(getContentResolver(), "enabled_notification_listeners",
+                        listeners.isEmpty() ? listener : listeners + ":" + listener);
+            }
+        } catch (RuntimeException ignored) {
+            // Not allowed: the card waits for notification access.
+        }
+        try {
             String me = getPackageName() + "/" + SourcesService.class.getName();
             String list = Settings.Secure.getString(getContentResolver(), "enabled_accessibility_services");
             if (list == null || "null".equals(list)) {
@@ -495,7 +511,7 @@ public class MainActivity extends Activity {
         if (!"select".equals(name)) {
             return; // only the selection sound is kept; the others were too much
         }
-        if (id != null && soundsReady && prefs.getBoolean(KEY_SOUNDS, true)) {
+        if (id != null && soundsReady && prefs.getBoolean(KEY_SOUNDS, false)) {
             // Quiet, like tvOS: the clicks are felt more than heard.
             float volume = "move".equals(name) ? 0.28f : 0.4f;
             sounds.play(id, volume, volume, 1, 0, 1f);
@@ -513,6 +529,37 @@ public class MainActivity extends Activity {
         final String demo = intent.getStringExtra("demo");
         if (demo != null) {
             handler.postDelayed(() -> demo(demo), 300);
+            return;
+        }
+        // Trying wallpapers from the computer (adb only): "--es wallpaper_test <file>" shows that
+        // file now, "--es wallpaper_test off" goes back to the one that suits the sky.
+        // Testing the room's lights from the computer: "--es ha_test on" / "off".
+        // Cinema from the computer, without the lights: "--es cinema_test 1".
+        // The remote's microphone (VoiceActivity): "cinema", or "search" with what was said.
+        final String voice = intent.getStringExtra("voice");
+        if (voice != null) {
+            final String said = intent.getStringExtra("voice_query");
+            handler.postDelayed(() -> voice(voice, said), 150);
+            return;
+        }
+        if (intent.getStringExtra("cinema_test") != null) {
+            startActivity(new Intent(this, CinemaActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(CinemaActivity.EXTRA_NAME, profileFirstName()));
+            return;
+        }
+        final String haTest = intent.getStringExtra("ha_test");
+        if (haTest != null) {
+            applyConfig(intent);
+            HomeAssistant.cinema(this, "on".equals(haTest));
+            return;
+        }
+        final String test = intent.getStringExtra("wallpaper_test");
+        if (test != null) {
+            wallpaperTest = "off".equals(test) ? null : test;
+            dynamicPick = null;
+            loadWallpaperList();
+            wallpaperIndex = -1;
+            showNextWallpaper();
             return;
         }
         if (applyConfig(intent)) {
@@ -575,6 +622,11 @@ public class MainActivity extends Activity {
         }
         cinemaReturn.setVisibility(CinemaActivity.alive ? View.VISIBLE : View.GONE);
         loadWallpaperList();
+        refreshDynamicWallpaper();
+        watchNowPlaying();
+        if (videoSource != null && wallpapers.contains(videoSource)) {
+            startVideo(videoSource);   // back from an app: the moving wallpaper starts again
+        }
         // Safety net: if the wallpaper went missing, bring one back.
         if (!wallLayers.isEmpty() && wallLayers.get(0)[front].getDrawable() == null) {
             handler.postDelayed(this::showNextWallpaper, 300);
@@ -602,6 +654,10 @@ public class MainActivity extends Activity {
         stopHeroVideo();
         stopPeekTv();
         stopSway();
+        // An app is in front: the moving wallpaper's decoder and buffers are freed right away
+        // (videoSource stays, so it starts again when home comes back).
+        releaseVideo();
+        unwatchNowPlaying();
         handler.removeCallbacksAndMessages(null);
         if (enteringCinema) {
             abortCinemaEntry();
@@ -676,6 +732,13 @@ public class MainActivity extends Activity {
         }
         SharedPreferences.Editor edit = prefs.edit();
         boolean changed = false;
+        // Home Assistant for Cinema mode's lights (see HomeAssistant).
+        for (String key : new String[]{"ha_url", "ha_token", "ha_entities", "plex_url", "plex_token"}) {
+            String value = intent.getStringExtra(key);
+            if (value != null) {
+                edit.putString(key, value.trim());
+            }
+        }
         String dockExtra = intent.getStringExtra(KEY_DOCK);
         if (dockExtra != null) {
             edit.putString(KEY_DOCK, dockExtra.trim());
@@ -765,6 +828,10 @@ public class MainActivity extends Activity {
             root.addView(glassLayer, full());
         }
 
+        // Moving wallpapers play on a surface behind the window; it must come before the picture
+        // layer, which covers it until the video's first frame is out and then fades away.
+        videoView = buildVideoView();
+        root.addView(videoView, full());
         wallSharp = wallLayer(0f, 1f);
         root.addView(wallSharp, full());
 
@@ -798,7 +865,7 @@ public class MainActivity extends Activity {
         pills = new LinearLayout(this);
         pills.setOrientation(LinearLayout.HORIZONTAL);
         pills.setClipChildren(false);
-        inputsPill = pill("Surse");
+        inputsPill = pill("Sources");
         inputsPill.setOnClickListener(v -> showControl(true));
         clockPill = pill("");
         // tvOS 26: the time sits in a longer capsule and the profile picture overlaps its right end.
@@ -829,6 +896,11 @@ public class MainActivity extends Activity {
         cinemaReturn.setVisibility(View.GONE);
         cinemaReturn.setId(View.generateViewId());
         pills.addView(cinemaReturn, new LinearLayout.LayoutParams(plp));
+        // The weather where the TV is, always there next to the clock ("Pluie  9°").
+        weatherPill = pill("");
+        weatherPill.setFocusable(false);
+        weatherPill.setVisibility(View.GONE);
+        pills.addView(weatherPill, new LinearLayout.LayoutParams(plp));
         pills.addView(clockPill, new LinearLayout.LayoutParams(plp));
         // The Google account's picture, in a glass ring like the tvOS profile button.
         avatar = new ImageView(this);
@@ -859,6 +931,8 @@ public class MainActivity extends Activity {
         claudeUsage.setBackground(new GlassDrawable(px(18), dp, 0x24FFFFFF));
         glass(claudeUsage, px(18), 0.8f);
         root.addView(claudeUsage, at(-2, px(36), Gravity.TOP | Gravity.START, side, px(26), 0, 0));
+        // Top left too: the music playing in another app (Spotify...), while it plays.
+        root.addView(buildNowPlaying(), at(px(290), -2, Gravity.TOP | Gravity.START, side, px(22), 0, 0));
         // Only on the home screen itself: it goes with the clock (app list, search, Cinema) and
         // also while Control Center or the row of posters is open.
         claudeUsage.setAlpha(0f);
@@ -880,7 +954,7 @@ public class MainActivity extends Activity {
         hint.setAlpha(0f);
         hint.setGravity(Gravity.CENTER);
         hint.setCompoundDrawablePadding(px(4));
-        hint.setText("Sus: Control Center  ·  Play: ecran complet");
+        hint.setText("Haut : Control Center  ·  Lecture : plein écran");
         hint.setTextColor(0xE6FFFFFF);
         hint.setCompoundDrawablesWithIntrinsicBounds(null, chevron(), null, null);
 
@@ -1496,7 +1570,7 @@ public class MainActivity extends Activity {
         // Settings as its own tile, drawn like the tvOS Settings icon (a gear on grey).
         App settings = new App();
         settings.pkg = SETTINGS_TILE;
-        settings.label = "Setări";
+        settings.label = "Réglages";
         settings.banner = new android.graphics.drawable.BitmapDrawable(getResources(), gearBanner());
         settings.icon = settings.banner;
         // Its own task: the home task clears itself on every launch and would close Settings at once.
@@ -1565,7 +1639,7 @@ public class MainActivity extends Activity {
             startActivity(intent);
             return true;
         } catch (RuntimeException e) {
-            SourcesService.say(this, "Nu pot deschide " + label);
+            SourcesService.say(this, "Impossible d'ouvrir " + label);
             return false;
         }
     }
@@ -1642,10 +1716,10 @@ public class MainActivity extends Activity {
     private void toggleDock(App app) {
         List<String> list = dockPackages();
         if (list.remove(app.pkg)) {
-            SourcesService.say(this, app.label + " a fost scos din rândul de sus");
+            SourcesService.say(this, app.label + " a été retiré de la rangée du haut");
         } else {
             list.add(app.pkg);
-            SourcesService.say(this, app.label + " a fost pus în rândul de sus");
+            SourcesService.say(this, app.label + " a été ajouté à la rangée du haut");
         }
         saveDock(list);
     }
@@ -1875,43 +1949,43 @@ public class MainActivity extends Activity {
     /** The kind of an item from its real program type. */
     private static String kindOf(Previews.Item it) {
         if (it.live || it.type == 5) {
-            return "Live";
+            return "Direct";
         }
         switch (it.type) {
-            case 0: return "Filme";
+            case 0: return "Films";
             case 1:
             case 2:
-            case 3: return "Seriale";
-            case 4: return "Clipuri";
-            case 6: return "Canale";
+            case 3: return "Séries";
+            case 4: return "Clips";
+            case 6: return "Chaînes";
             case 7:
             case 8:
             case 9:
             case 10:
-            case 11: return "Muzică";
-            case 12: return "Jocuri";
+            case 11: return "Musique";
+            case 12: return "Jeux";
             default: return null;
         }
     }
 
     private static String genreLabel(String g) {
         switch (g) {
-            case "FAMILY_KIDS": return "Copii";
+            case "FAMILY_KIDS": return "Jeunesse";
             case "SPORTS": return "Sport";
-            case "MOVIES": return "Filme";
-            case "COMEDY": return "Comedie";
-            case "DRAMA": return "Dramă";
-            case "NEWS": return "Știri";
+            case "MOVIES": return "Films";
+            case "COMEDY": return "Comédie";
+            case "DRAMA": return "Drame";
+            case "NEWS": return "Info";
             case "GAMING": return "Gaming";
-            case "MUSIC": return "Muzică";
-            case "ANIMAL_WILDLIFE": return "Natură";
-            case "TECH_SCIENCE": return "Știință";
-            case "EDUCATION": return "Educație";
-            case "TRAVEL": return "Călătorii";
+            case "MUSIC": return "Musique";
+            case "ANIMAL_WILDLIFE": return "Nature";
+            case "TECH_SCIENCE": return "Sciences";
+            case "EDUCATION": return "Éducation";
+            case "TRAVEL": return "Voyages";
             case "ENTERTAINMENT": return "Divertisment";
-            case "LIFE_STYLE": return "Stil de viață";
-            case "ARTS": return "Artă";
-            case "PREMIER": return "Premiere";
+            case "LIFE_STYLE": return "Art de vivre";
+            case "ARTS": return "Art";
+            case "PREMIER": return "Nouveautés";
             case "SHOPPING": return "Shopping";
             default: return g.charAt(0) + g.substring(1).toLowerCase(Locale.ROOT).replace('_', ' ');
         }
@@ -1959,7 +2033,7 @@ public class MainActivity extends Activity {
      */
     private static List<String[]> tabsFor(List<Previews.Item> items) {
         List<String[]> tabs = new ArrayList<>();
-        tabs.add(new String[]{"all", "Pentru tine"});
+        tabs.add(new String[]{"all", "Pour toi"});
         boolean going = false;
         Map<String, Integer> rows = new LinkedHashMap<>();
         Map<String, Integer> kinds = new LinkedHashMap<>();
@@ -1978,7 +2052,7 @@ public class MainActivity extends Activity {
             }
         }
         if (going) {
-            tabs.add(new String[]{"go", "Continuă"});
+            tabs.add(new String[]{"go", "Continuer"});
         }
         if (rows.size() > 1) {
             boolean top = false;
@@ -2022,11 +2096,11 @@ public class MainActivity extends Activity {
     /** The TV tile's filters: all, favourites, then the channel categories that exist. */
     private List<String[]> liveTabs(List<ChannelActivity.Channel> channels) {
         List<String[]> tabs = new ArrayList<>();
-        tabs.add(new String[]{"all", "Acum"});
+        tabs.add(new String[]{"all", "Maintenant"});
         if (!prefs.getStringSet(Profiles.scoped(prefs, "live_tv_favourites"), new HashSet<>()).isEmpty()) {
-            tabs.add(new String[]{"fav", "Favorite"});
+            tabs.add(new String[]{"fav", "Favoris"});
         }
-        for (String cat : new String[]{"Știri", "Sport", "Filme", "Copii", "Documentare", "Muzică", "Generale"}) {
+        for (String cat : new String[]{"Info", "Sport", "Films", "Jeunesse", "Documentaires", "Musique", "Généralistes"}) {
             for (ChannelActivity.Channel ch : channels) {
                 if (cat.equals(ch.category)) {
                     tabs.add(new String[]{"cat:" + cat, cat});
@@ -2386,7 +2460,7 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        if (prefs.getBoolean("hide_manele", true)) {
+        if (prefs.getBoolean("hide_manele", false)) {
             java.util.Iterator<Previews.Item> drop = items.iterator();
             while (drop.hasNext()) {
                 if (isManele(drop.next())) {
@@ -2486,7 +2560,7 @@ public class MainActivity extends Activity {
                 int h = px(PEEK_H);
                 List<Card> cards = new ArrayList<>();
                 for (final LiveNow.Entry e : entries) {
-                    if (prefs.getBoolean("hide_manele", true) && isManeleText(e.channel.name + " " + e.programme)) {
+                    if (prefs.getBoolean("hide_manele", false) && isManeleText(e.channel.name + " " + e.programme)) {
                         continue;
                     }
                     if (hiddenPreviews().contains("live|" + e.channel.id)) {
@@ -2577,7 +2651,7 @@ public class MainActivity extends Activity {
                 TextView none = text(12.5f, Typeface.DEFAULT);
                 none.setAlpha(0.75f);
                 none.setGravity(Gravity.CENTER_VERTICAL);
-                none.setText("Nimic aici acum. Alege alt filtru de mai sus.");
+                none.setText("Rien ici pour l'instant. Choisis un autre filtre au-dessus.");
                 row.addView(none, new LinearLayout.LayoutParams(-2, px(PEEK_H)));
             }
             paintChips();
@@ -3037,7 +3111,7 @@ public class MainActivity extends Activity {
         tabContent.setClipChildren(false);
         tabContent.setClipToPadding(false);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
-        clp.topMargin = px(10);
+        clp.topMargin = px(12);
         controlList.addView(tabContent, clp);
         fillTab(controlTab, false);
 
@@ -3144,7 +3218,7 @@ public class MainActivity extends Activity {
             }
             for (final String pkg : LIVE_TV) {
                 if (isInstalled(pkg)) {
-                    tiles.add(smallTile("Antenă", "Live TV", "antenna", () -> {
+                    tiles.add(smallTile("Antenne", "Live TV", "antenna", () -> {
                         hideControl();
                         LiveTv.open(this);
                     }));
@@ -3152,7 +3226,7 @@ public class MainActivity extends Activity {
                 }
             }
             if (isInstalled(INPUT_PICKER)) {
-                tiles.add(smallTile("Toate", "sursele", "tv", () -> openPackage(INPUT_PICKER)));
+                tiles.add(smallTile("Toutes", "les sources", "tv", () -> openPackage(INPUT_PICKER)));
             }
             for (int i = 0; i < tiles.size(); i += 2) {
                 rows.add(pairRow(tiles.get(i), i + 1 < tiles.size() ? tiles.get(i + 1) : null));
@@ -3168,7 +3242,7 @@ public class MainActivity extends Activity {
             card.setBackground(cardGlass);
             glass(card, px(20), 0.8f);
             TextView switchTitle = text(11, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            switchTitle.setText("Schimbă profilul");
+            switchTitle.setText("Changer de profil");
             switchTitle.setAlpha(0.8f);
             switchTitle.setPadding(px(8), 0, 0, px(4));
             card.addView(switchTitle);
@@ -3208,23 +3282,23 @@ public class MainActivity extends Activity {
             final boolean quiet = prefs.getBoolean("dnd", false);
             final CcIcon moon = new CcIcon(this, dp, CcIcon.MOON, quiet);
             final View[] dndTile = new View[1];
-            dndTile[0] = iconTile(t("Nu deranja", "Do Not Disturb"), quiet ? t("Pornit", "On") : t("Oprit", "Off"),
+            dndTile[0] = iconTile("Ne pas déranger", quiet ? "Activé" : "Désactivé",
                     moon, () -> prefs.getBoolean("dnd", false), () -> {
                         boolean q = !prefs.getBoolean("dnd", false);
                         prefs.edit().putBoolean("dnd", q).apply();
                         moon.set(q);
-                        setTileDetail(dndTile[0], q ? t("Pornit", "On") : t("Oprit", "Off"));
+                        setTileDetail(dndTile[0], q ? "Activé" : "Désactivé");
                         switchLook(dndTile[0], moon, q, dndTile[0].isFocused());
                     });
             rows.add(bigRow(big, wifiTile, dndTile[0]));
-            View bluetooth = smallTile("Bluetooth", Connectivity.bluetoothOn() ? t("Pornit", "On") : t("Oprit", "Off"),
+            View bluetooth = smallTile("Bluetooth", Connectivity.bluetoothOn() ? "Activé" : "Désactivé",
                     "bluetooth", () -> expand(1), false);
             // The sleep timer: its clock shows the time left; choosing a time plays the change.
             final long sleepAt = SourcesService.sleepAt(this);
             final CcIcon clockIcon = new CcIcon(this, dp, CcIcon.TIMER, sleepAt != 0);
             clockIcon.setTimer(sleepAt, prefs.getLong("sleep_len", 0));
             sleepIcon = clockIcon;
-            View sleep = iconTile(t("Somn", "Sleep"), sleepDetail(sleepAt), clockIcon,
+            View sleep = iconTile("Veille", sleepDetail(sleepAt), clockIcon,
                     () -> SourcesService.sleepAt(this) != 0, () -> expand(2));
             rows.add(pairRow(bluetooth, sleep));
             ccBig = big;
@@ -3385,7 +3459,7 @@ public class MainActivity extends Activity {
         flp.bottomMargin = px(3);
         cell.addView(face, flp);
         final TextView name = text(10.5f, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        name.setText("Adaugă profil");
+        name.setText("Ajouter un profil");
         name.setGravity(Gravity.CENTER);
         name.setAlpha(0.7f);
         LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, -2);
@@ -3448,7 +3522,7 @@ public class MainActivity extends Activity {
         card.addView(title);
         TextView sub = text(11.5f, Typeface.DEFAULT);
         sub.setAlpha(0.7f);
-        sub.setText(editing == null ? "Cum se numește?" : "Cum vrei să apară, lângă ceas și în Cinema?");
+        sub.setText(editing == null ? "Comment s'appelle-t-il ?" : "Comment veux-tu apparaître, à côté de l'heure et dans Cinéma ?");
         card.addView(sub);
         final TextView field = text(17, Typeface.create("sans-serif-medium", Typeface.NORMAL));
         field.setGravity(Gravity.CENTER_VERTICAL);
@@ -3462,7 +3536,7 @@ public class MainActivity extends Activity {
         showText.run();
 
         // A full keyboard, every key visible: digits, QWERTY, Romanian letters, actions.
-        final String[] rows = {"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "ăâîșț-'."};
+        final String[] rows = {"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "éèàçù-'."};
         final List<TextView> letterKeys = new ArrayList<>();
         final Runnable relabel = () -> {
             for (TextView k : letterKeys) {
@@ -3513,13 +3587,13 @@ public class MainActivity extends Activity {
                     upper[0] = !upper[0];
                     relabel.run();
                 }},
-                {"Spațiu", 170, (Runnable) () -> {
+                {"Espace", 170, (Runnable) () -> {
                     if (typed.length() > 0 && typed.length() < 18) {
                         typed.append(' ');
                         showText.run();
                     }
                 }},
-                {"Șterge", 104, (Runnable) () -> {
+                {"Effacer", 104, (Runnable) () -> {
                     if (typed.length() > 0) {
                         typed.setLength(typed.length() - 1);
                         if (typed.length() == 0) {
@@ -3529,7 +3603,7 @@ public class MainActivity extends Activity {
                         showText.run();
                     }
                 }},
-                {"Gata", 104, (Runnable) () -> {
+                {"OK", 104, (Runnable) () -> {
                     String n = typed.toString().trim();
                     closeProfileModal();
                     if (editing != null) {
@@ -3616,8 +3690,8 @@ public class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setClipChildren(false);
-        View rename = capsuleButton("Schimbă numele", () -> askProfileName(p));
-        View picture = capsuleButton("Schimbă imaginea", () -> showAvatarPicker(p));
+        View rename = capsuleButton("Changer le nom", () -> askProfileName(p));
+        View picture = capsuleButton("Changer l'image", () -> showAvatarPicker(p));
         LinearLayout.LayoutParams a = new LinearLayout.LayoutParams(-2, px(42));
         a.rightMargin = px(14);
         row.addView(rename, a);
@@ -3676,7 +3750,7 @@ public class MainActivity extends Activity {
         card.setBackground(new GlassDrawable(px(28), dp, 0x331C1C1E));
         glass(card, px(28), 1f);
         TextView title = text(17, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        title.setText("Imaginea pentru " + p.name);
+        title.setText("L'image de " + p.name);
         card.addView(title);
         List<String> choices = new ArrayList<>();
         for (int i = 1; i <= 14; i++) {
@@ -3781,7 +3855,7 @@ public class MainActivity extends Activity {
         if (service != null) {
             service.showNotice("TV Home", new android.graphics.drawable.BitmapDrawable(getResources(),
                             Profiles.picture(this, prefs, p, px(32) * 2)),
-                    p.name, "Profilul este acum în uz");
+                    p.name, "Ce profil est maintenant actif");
         }
     }
 
@@ -3866,7 +3940,9 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- customisable shortcuts
 
     private static final String KEY_SHORTCUTS = "cc_shortcuts";
-    private static final String DEFAULT_SHORTCUTS = "search,claude,sources,antenna,apps,wallpaper,picture,sound,access,settings";
+    // No "sources" (the header already has the inputs button) and no "antenna" (no aerial here: it
+    // only reopened the last HDMI input). Each can be added back with "+".
+    private static final String DEFAULT_SHORTCUTS = "search,claude,apps,wallpaper,picture,sound,sleep,store,settings";
     private static final int SHORTCUT_COLUMNS = 4;
     private View ccEditing;
     private final java.util.WeakHashMap<View, String> shortcutIdOf = new java.util.WeakHashMap<>();
@@ -3874,20 +3950,20 @@ public class MainActivity extends Activity {
 
     /** Every shortcut the Control Center can hold: id, symbol, name. */
     private static final String[][] SHORTCUTS = {
-            {"search", "search", "Caută"},
+            {"search", "search", "Rechercher"},
             {"claude", "claude", "Claude"},
-            {"sources", "hdmi", "Surse"},
-            {"antenna", "antenna", "Antenă"},
-            {"apps", "list", "Aplicații"},
-            {"wallpaper", "image", "Fundal următor"},
-            {"picture", "tv", "Imagine"},
-            {"sound", "speaker", "Sunet"},
-            {"access", "access", "Accesibilitate"},
-            {"settings", "gear", "Setări"},
-            {"cameras", "camera", "Camere"},
-            {"sleep", "timer", "Oprire programată"},
+            {"sources", "hdmi", "Sources"},
+            {"antenna", "antenna", "Antenne"},
+            {"apps", "list", "Applications"},
+            {"wallpaper", "image", "Fond suivant"},
+            {"picture", "tv", "Image"},
+            {"sound", "speaker", "Son"},
+            {"access", "access", "Accessibilité"},
+            {"settings", "gear", "Réglages"},
+            {"cameras", "camera", "Caméras"},
+            {"sleep", "timer", "Mise en veille programmée"},
             {"store", "list", "Google Play"},
-            {"screensaver", "moon", "Screensaver"},
+            {"screensaver", "moon", "Écran de veille"},
     };
 
     private List<String> shortcutIds() {
@@ -3966,22 +4042,22 @@ public class MainActivity extends Activity {
             case "picture":
                 return () -> {
                     hideControl();
-                    launch(new Intent("android.settings.DISPLAY_SETTINGS"), "Imagine");
+                    launch(new Intent("android.settings.DISPLAY_SETTINGS"), "Image");
                 };
             case "sound":
                 return () -> {
                     hideControl();
-                    launch(new Intent("com.android.tv.action.VIEW_SOUND_SETTINGS"), "Sunet");
+                    launch(new Intent("com.android.tv.action.VIEW_SOUND_SETTINGS"), "Son");
                 };
             case "access":
                 return () -> {
                     hideControl();
-                    launch(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), "Accesibilitate");
+                    launch(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), "Accessibilité");
                 };
             case "settings":
                 return () -> {
                     hideControl();
-                    launch(new Intent(this, SettingsActivity.class), "Setări");
+                    launch(new Intent(this, SettingsActivity.class), "Réglages");
                 };
             case "cameras":
                 return () -> {
@@ -3991,7 +4067,7 @@ public class MainActivity extends Activity {
             case "sleep":
                 return () -> {
                     hideControl();
-                    launch(new Intent("com.tcl.action.sleep"), "Oprire programată");
+                    launch(new Intent("com.tcl.action.sleep"), "Mise en veille programmée");
                 };
             case "store":
                 return () -> {
@@ -4002,7 +4078,7 @@ public class MainActivity extends Activity {
                 return () -> {
                     hideControl();
                     launch(new Intent(Intent.ACTION_MAIN).setClassName("com.android.systemui",
-                            "com.android.systemui.Somnambulator"), "Screensaver");
+                            "com.android.systemui.Somnambulator"), "Écran de veille");
                 };
             default:
                 return () -> { };
@@ -4031,7 +4107,7 @@ public class MainActivity extends Activity {
         }
         if (shortcutIds().size() < SHORTCUTS.length) {
             View add = shortcutButton("plus", this::showAddShortcut, false);
-            add.setContentDescription("Adaugă");
+            add.setContentDescription("Ajouter");
             cells.add(add);
         }
         List<List<View>> rows = new ArrayList<>();
@@ -4095,7 +4171,7 @@ public class MainActivity extends Activity {
             names[i] = missing.get(i)[2];
         }
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Adaugă în Control Center")
+                .setTitle("Ajouter au Control Center")
                 .setItems(names, (dialog, which) -> {
                     have.add(missing.get(which)[0]);
                     saveShortcuts(have);
@@ -4321,7 +4397,8 @@ public class MainActivity extends Activity {
         curtain.setAlpha(0f);
         content.addView(curtain, full());
         cinemaCurtain = curtain;
-        handler.postDelayed(() -> cinemaPill("Activat", "Se sting luminile…"), 250);
+        handler.postDelayed(() -> cinemaPill("Activé", "Les lumières s'éteignent…"), 250);
+        HomeAssistant.cinema(this, true);   // the real lights of the room, when set up
         handler.postDelayed(() -> {
             playCinemaSound();
             cinemaPillsAlpha = pills.getAlpha();
@@ -4347,7 +4424,8 @@ public class MainActivity extends Activity {
      *  off" when Cinema was left, not when it only waits behind a film's app). */
     private void lightsOn(boolean announce) {
         if (announce) {
-            handler.postDelayed(() -> cinemaPill("Dezactivat", "Luminile sunt din nou aprinse"), 500);
+            handler.postDelayed(() -> cinemaPill("Désactivé", "Les lumières sont rallumées"), 500);
+            HomeAssistant.cinema(this, false);
         }
         if (cinemaCurtain == null || enteringCinema) {
             return;
@@ -4383,7 +4461,7 @@ public class MainActivity extends Activity {
     private View cinemaPillView;
 
     private void cinemaPill(String state, String detail) {
-        final boolean on = !"Dezactivat".equals(state);
+        final boolean on = !"Désactivé".equals(state);
         SourcesService service = SourcesService.instance;
         if (service != null && service.cinemaDrop(on, detail)) {
             return;
@@ -4403,7 +4481,7 @@ public class MainActivity extends Activity {
         final LinearLayout words = new LinearLayout(this);
         words.setOrientation(LinearLayout.VERTICAL);
         TextView head = text(13, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        head.setText("Mod Cinema");
+        head.setText("Mode Cinéma");
         words.addView(head);
         TextView body = text(10.5f, Typeface.DEFAULT);
         body.setAlpha(0.75f);
@@ -4578,8 +4656,8 @@ public class MainActivity extends Activity {
     }
 
     private String sleepDetail(long at) {
-        return at == 0 ? t("Oprit", "Off")
-                : t("la ", "at ") + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(at));
+        return at == 0 ? "Désactivé"
+                : "à " + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(at));
     }
 
     /**
@@ -4590,7 +4668,7 @@ public class MainActivity extends Activity {
         rows.removeAllViews();
         long at = SourcesService.sleepAt(this);
         if (at != 0) {
-            rows.addView(listRow(t("Nu se mai oprește", "Don't turn off"), sleepDetail(at), () -> chooseSleep(0)),
+            rows.addView(listRow("Ne pas éteindre", sleepDetail(at), () -> chooseSleep(0)),
                     listParams());
         }
         SleepClock clock = new SleepClock(this, dp, at, this::chooseSleep);
@@ -4605,7 +4683,7 @@ public class MainActivity extends Activity {
         SourcesService service = SourcesService.instance;
         if (service == null) {
             hideControl();
-            launch(new Intent("com.tcl.action.sleep"), t("Somn", "Sleep")); // the TV's own timer
+            launch(new Intent("com.tcl.action.sleep"), "Veille"); // the TV's own timer
             return;
         }
         play("select");
@@ -4714,8 +4792,7 @@ public class MainActivity extends Activity {
         if (searchTmdb.ready()) {
             search("");
         } else {
-            searchSay(t("Căutarea are nevoie de cheia TMDB (python tvtool.py tmdb).",
-                    "Search needs the TMDB key (python tvtool.py tmdb)."));
+            searchSay("La recherche a besoin de la clé TMDB (python tvtool.py tmdb).");
         }
     }
 
@@ -4778,7 +4855,7 @@ public class MainActivity extends Activity {
         field.addView(line, at(-2, -1, Gravity.CENTER_VERTICAL | Gravity.START, px(48), 0, px(18), 0));
         searchHint = text(17, Typeface.DEFAULT);
         searchHint.setShadowLayer(0, 0, 0, 0);
-        searchHint.setText(t("Filme, seriale, actori", "Films, series, actors"));
+        searchHint.setText("Films, séries, acteurs");
         searchHint.setAlpha(0.55f);
         field.addView(searchHint, at(-2, -2, Gravity.CENTER_VERTICAL | Gravity.START, px(52), 0, 0, 0));
         col.addView(field, new LinearLayout.LayoutParams(px(520), px(48)));
@@ -4881,7 +4958,7 @@ public class MainActivity extends Activity {
                 }
             }
             if (r == 2) {
-                line.addView(searchKey(t("spațiu", "space"), speech ? 1 : 2, () -> searchType(" ")));
+                line.addView(searchKey("espace", speech ? 1 : 2, () -> searchType(" ")));
                 View del = searchKey("⌫", 1, this::searchDelete);
                 del.setOnLongClickListener(v -> {
                     searchQuery.setLength(0);
@@ -4983,16 +5060,32 @@ public class MainActivity extends Activity {
         }
     };
 
+    /** What the remote's microphone asked for (see VoiceActivity). */
+    private void voice(String what, String said) {
+        if ("cinema".equals(what)) {
+            hideControl();
+            enterCinema();
+        } else if ("search".equals(what) && said != null && !said.trim().isEmpty()) {
+            hideControl();
+            openSearch();
+            searchQuery.setLength(0);
+            searchQuery.append(said.trim().toLowerCase(Locale.getDefault()));
+            searchChanged();
+            handler.removeCallbacks(searchNow);
+            searchNow.run();
+        }
+    }
+
     private void searchListen() {
         Intent speak = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                         android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, t("ro-RO", "en-US"))
-                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, t("Ce vrei să vezi?", "What would you like to watch?"));
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Que veux-tu regarder ?");
         try {
             startActivityForResult(speak, SEARCH_SPEECH);
         } catch (RuntimeException e) {
-            searchSay(t("Microfonul nu e disponibil", "The microphone is not available"));
+            searchSay("Le micro n'est pas disponible");
         }
     }
 
@@ -5046,15 +5139,15 @@ public class MainActivity extends Activity {
         }
         final int id = ++searchId;
         if (!q.isEmpty()) {
-            searchLabel.setText(t("Caut „", "Searching for “") + q + "”…");
+            searchLabel.setText("Recherche de « " + q + " »…");
         }
         final Tmdb tmdb = searchTmdb;
         searchNet.execute(() -> {
             final List<CinemaActivity.Title> found = new ArrayList<>();
             try {
                 org.json.JSONObject o = q.isEmpty()
-                        ? tmdb.get("/trending/all/day", "language=ro-RO", 6 * TMDB_HOUR)
-                        : tmdb.get("/search/multi", "language=ro-RO&include_adult=false&query="
+                        ? tmdb.get("/trending/all/day", "language=fr-FR", 6 * TMDB_HOUR)
+                        : tmdb.get("/search/multi", "language=fr-FR&include_adult=false&query="
                         + android.net.Uri.encode(q), 6 * TMDB_HOUR);
                 org.json.JSONArray results = o.optJSONArray("results");
                 List<CinemaActivity.Title> known = new ArrayList<>();
@@ -5076,7 +5169,7 @@ public class MainActivity extends Activity {
             } catch (java.io.IOException e) {
                 handler.post(() -> {
                     if (id == searchId) {
-                        searchSay(t("Nu pot căuta acum (internetul?)", "Cannot search right now (the internet?)"));
+                        searchSay("Recherche impossible pour l'instant (internet ?)");
                     }
                 });
                 return;
@@ -5142,7 +5235,7 @@ public class MainActivity extends Activity {
                 }
                 try {
                     String p = "/" + (t.tv ? "tv" : "movie") + "/" + t.id;
-                    org.json.JSONObject d = tmdb.get(p, "language=ro-RO&append_to_response="
+                    org.json.JSONObject d = tmdb.get(p, "language=fr-FR&append_to_response="
                             + android.net.Uri.encode("images,videos,watch/providers," + (t.tv ? "content_ratings" : "release_dates"))
                             + "&include_image_language=" + android.net.Uri.encode("ro,en,null")
                             + "&include_video_language=" + android.net.Uri.encode("ro,en,null"), 24 * TMDB_HOUR);
@@ -5197,9 +5290,9 @@ public class MainActivity extends Activity {
     private void searchShow(List<CinemaActivity.Title> found, String q) {
         searchTitles.clear();
         searchTitles.addAll(found);
-        searchLabel.setText(q.isEmpty() ? t("Populare azi", "Popular today")
-                : found.isEmpty() ? "" : t("Rezultate pentru „", "Results for “") + q + "”");
-        searchStatus.setText(found.isEmpty() ? t("Nimic pentru „", "Nothing for “") + q + "”" : "");
+        searchLabel.setText(q.isEmpty() ? "Populaires aujourd'hui"
+                : found.isEmpty() ? "" : "Résultats pour « " + q + " »");
+        searchStatus.setText(found.isEmpty() ? "Rien pour « " + q + " »" : "");
         searchStatus.setVisibility(found.isEmpty() ? View.VISIBLE : View.GONE);
         searchStatus.setAlpha(0.75f);
         searchBuildRow();
@@ -5335,7 +5428,7 @@ public class MainActivity extends Activity {
             searchInfoName.setText(t.name);
         }
         List<String> meta = new ArrayList<>();
-        meta.add(t.tv ? t("Serial", "Series") : t("Film", "Film"));
+        meta.add(t.tv ? "Série" : "Film");
         if (!t.year.isEmpty()) {
             meta.add(t.year);
         }
@@ -5355,16 +5448,16 @@ public class MainActivity extends Activity {
         searchInfoText.setText(t.overview);
         searchActions.removeAllViews();
         for (final CinemaActivity.Provider p : t.included) {
-            searchActions.addView(searchCapsule(t("Vezi pe ", "Watch on ") + p.name, () -> searchOpen(t, p)));
+            searchActions.addView(searchCapsule("Regarder sur " + p.name, () -> searchOpen(t, p)));
         }
         if (t.trailer != null) {
-            searchActions.addView(searchCapsule(t("Trailer", "Trailer"), () -> searchTrailer(t)));
+            searchActions.addView(searchCapsule("Bande-annonce", () -> searchTrailer(t)));
         }
         if (t.detailed && t.included.isEmpty()) {
             TextView note = text(11.5f, Typeface.DEFAULT);
             note.setAlpha(0.7f);
-            note.setText(t("Nu e pe abonamentele tale", "Not on your apps")
-                    + (t.rent.isEmpty() ? "" : t("  ·  de închiriat: ", "  ·  to rent: ") + TextUtils.join(", ", t.rent)));
+            note.setText("Pas sur tes abonnements"
+                    + (t.rent.isEmpty() ? "" : "  ·  à louer : " + TextUtils.join(", ", t.rent)));
             LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
             nlp.gravity = Gravity.CENTER_VERTICAL;
             nlp.leftMargin = searchActions.getChildCount() > 0 ? px(6) : 0;
@@ -5411,9 +5504,9 @@ public class MainActivity extends Activity {
         } else if (t.trailer != null) {
             searchTrailer(t);
         } else if (!t.detailed) {
-            searchSay(t("Un moment, caut unde rulează…", "One moment, looking for where it is on…"));
+            searchSay("Un instant, je cherche où le regarder…");
         } else {
-            searchSay(t("Nu e pe abonamentele tale", "Not on your apps"));
+            searchSay("Pas sur tes abonnements");
         }
     }
 
@@ -5441,7 +5534,7 @@ public class MainActivity extends Activity {
             try {
                 startActivity(watch.setPackage(null));
             } catch (RuntimeException ignored) {
-                searchSay(t("Nu pot porni trailerul", "Cannot play the trailer"));
+                searchSay("Impossible de lancer la bande-annonce");
             }
         }
     }
@@ -5534,7 +5627,7 @@ public class MainActivity extends Activity {
         panel.setClipToPadding(false);
         TextView heading = text(14, Typeface.create("sans-serif-medium", Typeface.NORMAL));
         heading.setText(wifi ? "Wi-Fi" : kind == 1 ? "Bluetooth" : kind == 3 ? "Claude"
-                : t("Oprire automată", "Sleep timer"));
+                : "Mise en veille");
         heading.setPadding(px(6), 0, 0, px(6));
         panel.addView(heading);
         final TextView note = text(10.5f, Typeface.DEFAULT);
@@ -5543,9 +5636,8 @@ public class MainActivity extends Activity {
             note.setSingleLine(false);
             note.setMaxLines(3);
             note.setAlpha(0.72f);
-            note.setText(t("Contul Claude al profilului " + profileName()
-                            + ": mesajele, întrebările, sarcinile și consumul lui apar doar aici.",
-                    "Claude account for " + profileName() + ": its messages, questions, tasks and usage show only here."));
+            note.setText("Le compte Claude du profil " + profileName()
+                            + " : ses messages, questions, tâches et sa consommation n'apparaissent qu'ici.");
             note.setPadding(px(6), 0, px(6), px(8));
             panel.addView(note);
         }
@@ -5833,7 +5925,7 @@ public class MainActivity extends Activity {
     /** After a panel folds back: the tiles say how things are now (network, Bluetooth, the timer). */
     private void refreshCcTiles() {
         setTileDetail(ccWifi, wifiName());
-        setTileDetail(ccBluetooth, Connectivity.bluetoothOn() ? t("Pornit", "On") : t("Oprit", "Off"));
+        setTileDetail(ccBluetooth, Connectivity.bluetoothOn() ? "Activé" : "Désactivé");
         if (sleepIcon != null && ccSleep != null) {
             long at = SourcesService.sleepAt(this);
             sleepIcon.setTimer(at, prefs.getLong("sleep_len", 0));
@@ -5855,10 +5947,10 @@ public class MainActivity extends Activity {
             rows.addView(listRow(name, "", a.id.equals(linked) ? new String[]{"check"} : null,
                     () -> claudeLink(rows, a.id)), listParams());
         }
-        rows.addView(listRow(t("Niciun cont", "No account"), "", linked.isEmpty() ? new String[]{"check"} : null,
+        rows.addView(listRow("Aucun compte", "", linked.isEmpty() ? new String[]{"check"} : null,
                 () -> claudeLink(rows, "")), listParams());
         if (accounts.isEmpty()) {
-            rows.addView(listRow(t("Pe calculator: tvtool claude --name …", "On the computer: tvtool claude --name …"),
+            rows.addView(listRow("Sur l'ordinateur : tvtool claude --name …",
                     "", () -> { }), listParams());
         }
         View again = rows.getChildAt(Math.min(at, rows.getChildCount() - 1));
@@ -5904,9 +5996,9 @@ public class MainActivity extends Activity {
             })), listParams());
         }
         if (networks.isEmpty()) {
-            rows.addView(listRow("Caut rețele…", "", () -> { }), listParams());
+            rows.addView(listRow("Recherche de réseaux…", "", () -> { }), listParams());
         }
-        rows.addView(listRow("Setări Wi-Fi", "›", () -> {
+        rows.addView(listRow("Réglages Wi-Fi", "›", () -> {
             hideControl();
             launch(new Intent(Settings.ACTION_WIFI_SETTINGS), "Wi-Fi");
         }), listParams());
@@ -5916,7 +6008,7 @@ public class MainActivity extends Activity {
         View focused = getCurrentFocus();
         rows.removeAllViews();
         for (final Connectivity.Device d : Connectivity.paired()) {
-            rows.addView(listRow(d.name, d.connected ? "Conectat" : "", () -> {
+            rows.addView(listRow(d.name, d.connected ? "Connecté" : "", () -> {
                 hideControl();
                 launch(new Intent().setClassName("com.android.tv.settings",
                         "com.tcl.settings.accessories.AccessoriesActivity"), d.name);
@@ -5932,13 +6024,13 @@ public class MainActivity extends Activity {
                 }
             }
             for (final Connectivity.Device d : named.subList(0, Math.min(4, named.size()))) {
-                rows.addView(listRow(d.name, "Asociază", () -> SourcesService.say(this,
-                        Connectivity.pair(d) ? "Se asociază cu " + d.name + "…" : "Nu am putut porni asocierea")),
+                rows.addView(listRow(d.name, "Associer", () -> SourcesService.say(this,
+                        Connectivity.pair(d) ? "Association avec " + d.name + "…" : "Impossible de lancer l'association")),
                         listParams());
             }
         }
-        rows.addView(listRow(btFound.isEmpty() ? "Caut dispozitive…" : "Alte dispozitive", "", () -> { }), listParams());
-        rows.addView(listRow("Asociază telecomandă sau accesoriu", "›", () -> {
+        rows.addView(listRow(btFound.isEmpty() ? "Recherche d'appareils…" : "Autres appareils", "", () -> { }), listParams());
+        rows.addView(listRow("Associer une télécommande ou un accessoire", "›", () -> {
             hideControl();
             launch(new Intent().setClassName("com.android.tv.settings",
                     "com.android.tv.settings.accessories.AddAccessoryActivity"), "Bluetooth");
@@ -6068,12 +6160,12 @@ public class MainActivity extends Activity {
         try {
             WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
             if (wifi == null || !wifi.isWifiEnabled()) {
-                return "Oprit";
+                return "Désactivé";
             }
             WifiInfo info = wifi.getConnectionInfo();
             String ssid = info != null ? info.getSSID() : null;
             if (ssid == null || ssid.contains("unknown") || ssid.equals("0x")) {
-                return info != null && info.getNetworkId() != -1 ? "Conectat" : "";
+                return info != null && info.getNetworkId() != -1 ? "Connecté" : "";
             }
             return ssid.replace("\"", "");
         } catch (RuntimeException e) {
@@ -6308,7 +6400,11 @@ public class MainActivity extends Activity {
             }
             if (homeVisible && chipsFocused()) {
                 if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                    showControl(false);
+                    // A calm step before Control Center: the cards and filters go, the wallpaper
+                    // and the dock stay, the profile button holds the focus. Up again: Control Center.
+                    hideHero();
+                    hidePeek();
+                    avatar.requestFocus();
                     return true;
                 }
                 if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
@@ -6335,6 +6431,9 @@ public class MainActivity extends Activity {
             }
             if (homeVisible && code == KeyEvent.KEYCODE_DPAD_UP && focused == avatar) {
                 showControl(false);
+                return true;
+            }
+            if (homeVisible && code == KeyEvent.KEYCODE_DPAD_LEFT && focused == avatar && focusMusic()) {
                 return true;
             }
             if (focused != null && control.getVisibility() != View.VISIBLE
@@ -6823,7 +6922,7 @@ public class MainActivity extends Activity {
         if (item.channel != null && !item.channel.isEmpty() && !item.channel.equalsIgnoreCase(source)) {
             source += "  ·  " + item.channel;
         } else if (item.watchNext) {
-            source += "  ·  Continuă vizionarea";
+            source += "  ·  Reprendre la lecture";
         }
         heroApp.setText(source.toUpperCase(Locale.getDefault()));
         heroTitle.setText(item.title);
@@ -7284,18 +7383,18 @@ public class MainActivity extends Activity {
         final String current = Folders.of(folders, app.pkg);
         final List<String> labels = new ArrayList<>();
         final List<Runnable> actions = new ArrayList<>();
-        labels.add("Pune în rândul de sus");
+        labels.add("Mettre dans la rangée du haut");
         actions.add(() -> {
             Folders.move(folders, app.pkg, null);
             Folders.save(prefs, folders);
             closeFolder();
             toggleDock(app);
         });
-        labels.add("Folder nou…");
+        labels.add("Nouveau dossier…");
         actions.add(() -> askFolderName(app));
         for (final String name : folders.keySet()) {
             if (!name.equals(current)) {
-                labels.add("Mută în „" + name + "”");
+                labels.add("Déplacer dans « " + name + " »");
                 actions.add(() -> {
                     Folders.move(folders, app.pkg, name);
                     Folders.save(prefs, folders);
@@ -7304,7 +7403,7 @@ public class MainActivity extends Activity {
                 });
             }
         }
-        labels.add("Ascunde în profilul acesta");
+        labels.add("Masquer dans ce profil");
         actions.add(() -> {
             Folders.move(folders, app.pkg, null);
             Folders.save(prefs, folders);
@@ -7313,11 +7412,11 @@ public class MainActivity extends Activity {
         });
         final java.util.Set<String> hiddenNow = hiddenApps();
         if (!hiddenNow.isEmpty()) {
-            labels.add("Aplicații ascunse (" + hiddenNow.size() + ")…");
+            labels.add("Applications masquées (" + hiddenNow.size() + ")…");
             actions.add(this::hiddenAppsMenu);
         }
         if (current != null) {
-            labels.add("Scoate din „" + current + "”");
+            labels.add("Retirer de « " + current + " »");
             actions.add(() -> {
                 Folders.move(folders, app.pkg, null);
                 Folders.save(prefs, folders);
@@ -7340,19 +7439,19 @@ public class MainActivity extends Activity {
             names.add(a != null ? a.label.toString() : pkg);
         }
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                .setTitle("Arată din nou")
+                .setTitle("Afficher à nouveau")
                 .setItems(names.toArray(new String[0]), (dialog, which) -> setHidden(pkgs.get(which), false))
                 .show();
     }
 
     private void askFolderName(final App app) {
         final android.widget.EditText input = new android.widget.EditText(this);
-        input.setHint("Numele folderului");
+        input.setHint("Nom du dossier");
         input.setSingleLine(true);
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Folder nou")
                 .setView(input)
-                .setPositiveButton("Creează", (dialog, which) -> {
+                .setPositiveButton("Créer", (dialog, which) -> {
                     String name = input.getText().toString().trim();
                     if (!name.isEmpty()) {
                         Folders.move(folders, app.pkg, name);
@@ -7361,14 +7460,14 @@ public class MainActivity extends Activity {
                         rebuildTiles();
                     }
                 })
-                .setNegativeButton("Renunță", null)
+                .setNegativeButton("Annuler", null)
                 .show();
     }
 
     private void folderMenu(final String name) {
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(name)
-                .setItems(new String[]{"Desfă folderul"}, (dialog, which) -> {
+                .setItems(new String[]{"Défaire le dossier"}, (dialog, which) -> {
                     folders.remove(name);
                     Folders.save(prefs, folders);
                     rebuildTiles();
@@ -7381,7 +7480,7 @@ public class MainActivity extends Activity {
     private void showCameras() {
         List<Cameras.Camera> list = Cameras.load(getExternalFilesDir(null));
         if (list.isEmpty()) {
-            SourcesService.say(this, "Nicio cameră", "python tvtool.py cameras add \"Nume\" rtsp://…");
+            SourcesService.say(this, "Aucune caméra", "python tvtool.py cameras add \"Nom\" rtsp://…");
             return;
         }
         if (camerasPane != null) {
@@ -7659,6 +7758,25 @@ public class MainActivity extends Activity {
         return new SimpleDateFormat(pattern, Locale.getDefault()).format(new Date());
     }
 
+    private TextView weatherPill;
+
+    /** "Pluie  9°" from the last weather read (DynamicWallpaper.currentMood stores it). */
+    private void updateWeatherPill() {
+        if (weatherPill == null) {
+            return;
+        }
+        if (!prefs.contains("dyn_temp") || !prefs.getBoolean("notify_weather", true)) {
+            weatherPill.setVisibility(View.GONE);
+            return;
+        }
+        String words = Weather.words(prefs.getInt("dyn_code", 0));
+        if (!prefs.getBoolean("dyn_day", true) && prefs.getInt("dyn_code", 0) <= 1) {
+            words = "Nuit claire";
+        }
+        weatherPill.setText((words.isEmpty() ? "" : words + "  ") + prefs.getInt("dyn_temp", 0) + "°");
+        weatherPill.setVisibility(View.VISIBLE);
+    }
+
     private void updateClock() {
         clockPill.setText(clockText());
         handler.removeCallbacks(clockTick);
@@ -7767,6 +7885,23 @@ public class MainActivity extends Activity {
         List<String> found = new ArrayList<>();
         File dir = getExternalFilesDir("wallpapers");
         File[] files = dir != null ? dir.listFiles() : null;
+        List<File> dynamic = DynamicWallpaper.files(this);
+        if (wallpaperTest != null && new File(wallpaperTest).exists()) {
+            found.add(wallpaperTest);   // a wallpaper being tried from the computer
+            files = null;
+            dynamic = java.util.Collections.singletonList(new File(wallpaperTest));   // no built-in photos
+        } else if (!dynamic.isEmpty()) {
+            // Wallpapers that follow the sky take over: one at a time, the one that fits now.
+            String pick = dynamicPick;
+            if (pick == null || !new File(pick).exists()) {
+                File first = DynamicWallpaper.pick(dynamic, prefs.getString("dyn_mood", DynamicWallpaper.NEUTRAL));
+                pick = first != null ? first.getAbsolutePath() : null;
+            }
+            if (pick != null) {
+                found.add(pick);
+            }
+            files = null;
+        }
         if (files != null) {
             for (File f : files) {
                 if (isImage(f.getName())) {
@@ -7775,7 +7910,7 @@ public class MainActivity extends Activity {
             }
         }
         try {
-            String[] assets = found.isEmpty() || prefs.getBoolean(KEY_BUILTIN, true)
+            String[] assets = dynamic.isEmpty() && (found.isEmpty() || prefs.getBoolean(KEY_BUILTIN, true))
                     ? getAssets().list("wallpapers") : null;
             if (assets != null) {
                 for (String name : assets) {
@@ -7836,17 +7971,317 @@ public class MainActivity extends Activity {
         }
     }
 
-    private final Runnable wallpaperTick = this::showNextWallpaper;
+    private final Runnable wallpaperTick = () -> {
+        refreshDynamicWallpaper();   // the sky may have changed (it asks at most every 20 min)
+        showNextWallpaper();
+    };
+
+    // ================================================================ now playing
+
+    private LinearLayout nowPlaying;
+    private ImageView nowArt;
+    private TextView nowTitle;
+    private TextView nowArtist;
+    private android.media.session.MediaController nowController;
+    private android.media.session.MediaSessionManager.OnActiveSessionsChangedListener sessionsListener;
+
+    /** A glass card at the top left with what Spotify (or any player) is playing, while it plays. */
+    private View buildNowPlaying() {
+        // A narrow card that grows downwards: the cover and the words, the three buttons below.
+        nowPlaying = new LinearLayout(this);
+        nowPlaying.setOrientation(LinearLayout.VERTICAL);
+        nowPlaying.setPadding(px(10), px(10), px(10), px(14));
+        nowPlaying.setBackground(new GlassDrawable(px(18), dp, 0x33202226));
+        glass(nowPlaying, px(18), 0.8f);
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        nowArt = new ImageView(this);
+        nowArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        nowArt.setOutlineProvider(roundOutline(px(11)));
+        nowArt.setClipToOutline(true);
+        top.addView(nowArt, new LinearLayout.LayoutParams(px(56), px(56)));
+        LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        nowTitle = text(14, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        // A long title scrolls slowly, like on Apple TV, instead of being cut.
+        nowTitle.setSingleLine(true);
+        nowTitle.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+        nowTitle.setMarqueeRepeatLimit(-1);
+        nowTitle.setHorizontalFadingEdgeEnabled(true);
+        nowTitle.setFadingEdgeLength(px(14));
+        nowTitle.setSelected(true);
+        nowArtist = text(12, Typeface.DEFAULT);
+        nowArtist.setSingleLine(true);
+        nowArtist.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+        nowArtist.setMarqueeRepeatLimit(-1);
+        nowArtist.setHorizontalFadingEdgeEnabled(true);
+        nowArtist.setFadingEdgeLength(px(14));
+        nowArtist.setSelected(true);
+        nowArtist.setAlpha(0.72f);
+        words.addView(nowTitle, new LinearLayout.LayoutParams(-1, -2));
+        words.addView(nowArtist, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(0, -2, 1f);
+        wlp.leftMargin = px(12);
+        top.addView(words, wlp);
+        nowPlaying.addView(top, new LinearLayout.LayoutParams(-1, -2));
+        // Previous, play/pause, next: reached with Left from the profile button.
+        nowControls = new LinearLayout(this);
+        nowControls.setOrientation(LinearLayout.HORIZONTAL);
+        nowControls.setGravity(Gravity.CENTER);
+        nowControls.setClipChildren(false);
+        nowControls.addView(mediaButton(MediaGlyph.PREVIOUS, c -> c.getTransportControls().skipToPrevious()),
+                mediaParams(0));
+        nowPlayPause = mediaButton(MediaGlyph.PAUSE, c -> {
+            android.media.session.PlaybackState s = c.getPlaybackState();
+            if (s != null && s.getState() == android.media.session.PlaybackState.STATE_PLAYING) {
+                c.getTransportControls().pause();
+            } else {
+                c.getTransportControls().play();
+            }
+        });
+        nowControls.addView(nowPlayPause, mediaParams(px(18)));
+        nowControls.addView(mediaButton(MediaGlyph.NEXT, c -> c.getTransportControls().skipToNext()),
+                mediaParams(px(18)));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
+        clp.topMargin = px(12);
+        nowPlaying.addView(nowControls, clp);
+        nowPlaying.setClipChildren(false);
+        // A focused button grows by 15%: it may spill into the card's padding, not be cut by it.
+        nowPlaying.setClipToPadding(false);
+        nowControls.setClipToPadding(false);
+        nowPlaying.setAlpha(0f);
+        nowPlaying.setVisibility(View.GONE);
+        return nowPlaying;
+    }
+
+    private LinearLayout nowControls;
+    private MediaGlyph nowPlayPause;
+
+    private void setMusicFocusable(boolean on) {
+        for (int i = 0; nowControls != null && i < nowControls.getChildCount(); i++) {
+            nowControls.getChildAt(i).setFocusable(on);
+        }
+    }
+
+    /** Left from the profile button: into the music card's buttons (on "next", the nearest). */
+    private boolean focusMusic() {
+        if (nowPlaying == null || nowPlaying.getVisibility() != View.VISIBLE || nowPlaying.getAlpha() < 0.5f) {
+            return false;
+        }
+        setMusicFocusable(true);
+        nowControls.getChildAt(nowControls.getChildCount() - 1).requestFocus();
+        return true;
+    }
+
+    private interface MediaAction {
+        void run(android.media.session.MediaController controller);
+    }
+
+    private LinearLayout.LayoutParams mediaParams(int left) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(40), px(40));
+        lp.leftMargin = left;
+        return lp;
+    }
+
+    /** A round glass button of the music card; white with a dark symbol when focused. */
+    private MediaGlyph mediaButton(int kind, MediaAction action) {
+        final MediaGlyph b = new MediaGlyph(this, kind);
+        final GlassDrawable g = new GlassDrawable(px(20), dp, 0x33FFFFFF);
+        b.setBackground(g);
+        // Not in the way of the usual moves: only reachable with Left from the profile button.
+        b.setFocusable(false);
+        b.setOnFocusChangeListener((v, has) -> {
+            g.setTint(has ? 0xF2FFFFFF : 0x33FFFFFF);
+            b.setColor(has ? 0xFF111111 : Color.WHITE);
+            b.animate().scaleX(has ? 1.15f : 1f).scaleY(has ? 1.15f : 1f).setInterpolator(EASE).setDuration(200).start();
+            if (!has) {
+                handler.post(() -> {
+                    if (nowPlaying != null && !nowPlaying.hasFocus()) {
+                        setMusicFocusable(false);
+                    }
+                });
+            }
+        });
+        b.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) {
+                return false;
+            }
+            int i = nowControls.indexOfChild(v);
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (i + 1 < nowControls.getChildCount()) {
+                    nowControls.getChildAt(i + 1).requestFocus();
+                } else {
+                    avatar.requestFocus();
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (i > 0) {
+                    nowControls.getChildAt(i - 1).requestFocus();
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_BACK) {
+                focusDock(lastDockIndex);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                v.performClick();
+                return true;
+            }
+            return keyCode == KeyEvent.KEYCODE_DPAD_UP;
+        });
+        b.setOnClickListener(v -> {
+            android.media.session.MediaController c = nowController;
+            if (c != null) {
+                try {
+                    action.run(c);
+                } catch (RuntimeException ignored) {
+                    // The player went away.
+                }
+            }
+        });
+        return b;
+    }
+
+    private final android.media.session.MediaController.Callback nowCallback =
+            new android.media.session.MediaController.Callback() {
+                @Override
+                public void onPlaybackStateChanged(android.media.session.PlaybackState state) {
+                    handler.post(MainActivity.this::showNowPlaying);
+                }
+
+                @Override
+                public void onMetadataChanged(android.media.MediaMetadata metadata) {
+                    handler.post(MainActivity.this::showNowPlaying);
+                }
+            };
+
+    /** Follows the active media sessions (needs notification access, granted to NoticeListener). */
+    private void watchNowPlaying() {
+        try {
+            android.media.session.MediaSessionManager manager =
+                    (android.media.session.MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
+            android.content.ComponentName listener = new android.content.ComponentName(this, NoticeListener.class);
+            if (sessionsListener == null) {
+                sessionsListener = controllers -> handler.post(() -> followController(controllers));
+                manager.addOnActiveSessionsChangedListener(sessionsListener, listener, handler);
+            }
+            followController(manager.getActiveSessions(listener));
+        } catch (SecurityException | NullPointerException e) {
+            // No notification access: no card.
+        }
+    }
+
+    private void unwatchNowPlaying() {
+        try {
+            if (sessionsListener != null) {
+                ((android.media.session.MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE))
+                        .removeOnActiveSessionsChangedListener(sessionsListener);
+            }
+        } catch (RuntimeException ignored) {
+            // Already gone.
+        }
+        sessionsListener = null;
+        if (nowController != null) {
+            nowController.unregisterCallback(nowCallback);
+            nowController = null;
+        }
+    }
+
+    private void followController(List<android.media.session.MediaController> controllers) {
+        android.media.session.MediaController pick = null;
+        if (controllers != null) {
+            for (android.media.session.MediaController c : controllers) {
+                if (getPackageName().equals(c.getPackageName())) {
+                    continue;   // our own volume session
+                }
+                android.media.session.PlaybackState s = c.getPlaybackState();
+                if (pick == null || (s != null && s.getState() == android.media.session.PlaybackState.STATE_PLAYING)) {
+                    pick = c;
+                }
+            }
+        }
+        if (nowController != null && (pick == null || !nowController.getSessionToken().equals(pick.getSessionToken()))) {
+            nowController.unregisterCallback(nowCallback);
+            nowController = null;
+        }
+        if (pick != null && nowController == null) {
+            nowController = pick;
+            nowController.registerCallback(nowCallback, handler);
+        }
+        showNowPlaying();
+    }
+
+    private void showNowPlaying() {
+        if (nowPlaying == null) {
+            return;
+        }
+        android.media.session.MediaController c = nowController;
+        android.media.session.PlaybackState state = c != null ? c.getPlaybackState() : null;
+        android.media.MediaMetadata meta = c != null ? c.getMetadata() : null;
+        int st = state != null ? state.getState() : android.media.session.PlaybackState.STATE_NONE;
+        boolean playing = st == android.media.session.PlaybackState.STATE_PLAYING
+                || st == android.media.session.PlaybackState.STATE_BUFFERING;
+        // Paused stays on screen (so it can be started again from here); stopped goes away.
+        boolean show = meta != null && (playing || st == android.media.session.PlaybackState.STATE_PAUSED);
+        if (!show) {
+            if (nowPlaying.hasFocus() && avatar != null) {
+                avatar.requestFocus();
+            }
+            nowPlaying.animate().alpha(0f).setDuration(300)
+                    .withEndAction(() -> nowPlaying.setVisibility(View.GONE)).start();
+            return;
+        }
+        nowPlayPause.setKind(playing ? MediaGlyph.PAUSE : MediaGlyph.PLAY);
+        String title = meta.getString(android.media.MediaMetadata.METADATA_KEY_TITLE);
+        String artist = meta.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST);
+        if (artist == null) {
+            artist = meta.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST);
+        }
+        Bitmap art = meta.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (art == null) {
+            art = meta.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART);
+        }
+        nowTitle.setText(title != null ? title : "");
+        nowArtist.setText(artist != null ? artist : "");
+        if (art != null) {
+            nowArt.setImageBitmap(art);
+            nowArt.setVisibility(View.VISIBLE);
+        } else {
+            nowArt.setVisibility(View.GONE);
+        }
+        if (nowPlaying.getVisibility() != View.VISIBLE) {
+            nowPlaying.setVisibility(View.VISIBLE);
+            nowPlaying.setTranslationY(-px(12));
+        }
+        nowPlaying.animate().alpha(1f).translationY(0f).setDuration(400).start();
+    }
 
     private void showNextWallpaper() {
         handler.removeCallbacks(wallpaperTick);
         if (wallpapers.isEmpty()) {
             return;
         }
+        // A single moving wallpaper already on screen: nothing to change, keep it playing.
+        if (wallpapers.size() == 1 && wallpapers.get(0).equals(videoSource) && videoPlayer != null) {
+            if (resumed) {
+                handler.postDelayed(wallpaperTick, prefs.getInt(KEY_INTERVAL, 300) * 1000L);
+            }
+            return;
+        }
         wallpaperIndex = (wallpaperIndex + 1) % wallpapers.size();
         final String source = wallpapers.get(wallpaperIndex);
+        final boolean video = DynamicWallpaper.isVideo(source);
+        if (video) {
+            // This TV has one 4K decoder: the old video lets go of it before anything else asks.
+            releaseVideo();
+            videoSource = source;
+            videoRetries = 0;
+        }
         worker.execute(() -> {
-            final Bitmap bitmap = vivid(decode(source, screenW, screenH));
+            final Bitmap bitmap = vivid(video ? posterOf(source) : decode(source, screenW, screenH));
             final Bitmap soft = bitmap != null ? frosted(bitmap, 192, 3, 3, 1.3f) : null;
             // The glass panes see a lightly blurred, more saturated copy: enough blur to read
             // as glass, enough detail for the lens at the rim to have something to bend.
@@ -7857,8 +8292,239 @@ public class MainActivity extends Activity {
                     showPlace(captions.get(source));
                     wallpaperShownAt = SystemClock.elapsedRealtime();
                 }
+                if (video) {
+                    // The still frame above is the poster (and what the glass sees); the
+                    // video takes over once its first frame is on screen. A short pause lets
+                    // the media server finish freeing the previous decoder.
+                    handler.postDelayed(() -> {
+                        if (source.equals(videoSource)) {
+                            startVideo(source);
+                        }
+                    }, 400);
+                } else {
+                    stopVideo();
+                }
                 if (resumed) {
                     handler.postDelayed(wallpaperTick, prefs.getInt(KEY_INTERVAL, 300) * 1000L);
+                }
+            });
+        });
+    }
+
+    // ================================================================ moving wallpapers
+
+    private android.view.SurfaceView videoView;
+    private android.media.MediaPlayer videoPlayer;
+    /** The video wallpaper on screen (or wanted on screen), null for a still one. */
+    private String videoSource;
+    private boolean videoSurfaceReady;
+    /** A player has been connected to the current surface (it needs a fresh one for the next). */
+    private boolean surfaceUsed;
+
+    /** The surface behind the window where moving wallpapers play (the picture layer sits over it). */
+    private android.view.SurfaceView buildVideoView() {
+        android.view.SurfaceView view = new android.view.SurfaceView(this);
+        view.getHolder().addCallback(new android.view.SurfaceHolder.Callback() {
+            @Override
+            public void surfaceCreated(android.view.SurfaceHolder holder) {
+                videoSurfaceReady = true;
+                surfaceUsed = false;
+                if (videoSource != null && videoPlayer == null && resumed) {
+                    startVideo(videoSource);
+                }
+            }
+
+            @Override
+            public void surfaceChanged(android.view.SurfaceHolder holder, int format, int width, int height) {
+            }
+
+            @Override
+            public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+                videoSurfaceReady = false;
+                releaseVideo();
+            }
+        });
+        return view;
+    }
+
+    /** Plays a moving wallpaper: muted, looping, filling the screen; only while home is in front. */
+    private void startVideo(String source) {
+        if (videoPlayer != null && source.equals(videoSource)) {
+            return;
+        }
+        releaseVideo();
+        videoSource = source;
+        prefs.edit().putString("wallpaper_now", source).apply();   // for the Settings screen's TV
+        if (!resumed || !videoSurfaceReady || videoView == null) {
+            return;   // starts when the surface exists and home is in front
+        }
+        if (surfaceUsed) {
+            // A player already drew on this surface: the media server lets go of it a moment
+            // after release(), and a new decoder connecting before then fails on this TV. A fresh
+            // surface avoids that; surfaceCreated() starts the video on it.
+            videoView.setVisibility(View.GONE);
+            handler.post(() -> videoView.setVisibility(View.VISIBLE));
+            return;
+        }
+        try {
+            final android.media.MediaPlayer player = new android.media.MediaPlayer();
+            surfaceUsed = true;
+            player.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_UNKNOWN)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE).build());
+            player.setDataSource(source);
+            player.setSurface(videoView.getHolder().getSurface());
+            player.setLooping(true);
+            player.setVolume(0f, 0f);   // wallpapers never make a sound
+            player.setOnPreparedListener(mp -> {
+                mp.setVideoScalingMode(android.media.MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+                mp.start();
+            });
+            player.setOnInfoListener((mp, what, extra) -> {
+                if (what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && mp == videoPlayer) {
+                    // The picture layer fades out over the playing video.
+                    wallSharp.animate().alpha(0f).setDuration(700).start();
+                }
+                return false;
+            });
+            player.setOnErrorListener((mp, what, extra) -> {
+                android.util.Log.w("TVHome", "video wallpaper error " + what + "/" + extra + ": " + source);
+                releaseVideo();
+                // Sometimes the decoder was still busy: try once more a little later. If it fails
+                // again the TV cannot play this file (4K at 60 fps...): another wallpaper instead.
+                if (videoRetries++ < 1) {
+                    handler.postDelayed(() -> {
+                        if (resumed && source.equals(videoSource)) {
+                            startVideo(source);
+                        }
+                    }, 1500);
+                } else {
+                    DynamicWallpaper.UNPLAYABLE.add(source);
+                    videoSource = null;
+                    dynamicPick = null;
+                    loadWallpaperList();
+                    refreshDynamicWallpaper();
+                    if (wallpaperIndex < 0) {
+                        showNextWallpaper();
+                    }
+                }
+                return true;
+            });
+            videoPlayer = player;
+            player.prepareAsync();
+        } catch (Exception e) {
+            android.util.Log.w("TVHome", "video wallpaper: " + e);
+            releaseVideo();
+        }
+    }
+
+    /** Frees the decoder and its buffers; the still frame comes back over the surface. */
+    /** Video players are let go here, one after another (see releaseVideo). */
+    static final java.util.concurrent.ExecutorService VIDEO_RELEASE = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private void releaseVideo() {
+        android.media.MediaPlayer player = videoPlayer;
+        videoPlayer = null;
+        if (player != null) {
+            // Off the main thread: on this TV the media server can take seconds to let go (for
+            // instance while the screen saver starts its own video), which froze the home screen.
+            VIDEO_RELEASE.execute(() -> {
+                try {
+                    player.release();
+                } catch (RuntimeException ignored) {
+                    // Already gone.
+                }
+            });
+        }
+        if (wallSharp != null) {
+            wallSharp.animate().cancel();
+            wallSharp.setAlpha(1f);
+        }
+    }
+
+    /** No moving wallpaper any more (a still one was chosen). */
+    private void stopVideo() {
+        videoSource = null;
+        releaseVideo();
+    }
+
+    private int videoRetries;
+
+    /**
+     * The video's still frame, kept as a JPEG in the cache: read once from the video (with the
+     * decoder free), then straight from the file, so changing wallpaper never fights the player.
+     */
+    /** Where the still of a video wallpaper is kept (the Settings screen shows it too). */
+    static File posterFile(Context context, String source) {
+        File video = new File(source);
+        return new File(new File(context.getCacheDir(), "posters"),
+                Integer.toHexString((source + video.lastModified() + video.length()).hashCode()) + ".jpg");
+    }
+
+    private Bitmap posterOf(String source) {
+        File poster = posterFile(this, source);
+        File dir = poster.getParentFile();
+        if (poster.exists()) {
+            Bitmap cached = BitmapFactory.decodeFile(poster.getAbsolutePath());
+            if (cached != null) {
+                return cached;
+            }
+        }
+        Bitmap frame = videoFrame(source, screenW, screenH);
+        if (frame != null) {
+            dir.mkdirs();
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(poster)) {
+                frame.compress(Bitmap.CompressFormat.JPEG, 90, out);
+            } catch (java.io.IOException ignored) {
+                // Read it from the video again next time.
+            }
+        }
+        return frame;
+    }
+
+    /** The first frame of a video, at about the screen's size. */
+    static Bitmap videoFrame(String source, int targetW, int targetH) {
+        android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+        try {
+            r.setDataSource(source);
+            Bitmap frame = r.getScaledFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    targetW, targetH);
+            return frame;
+        } catch (RuntimeException e) {
+            return null;
+        } finally {
+            try {
+                r.release();
+            } catch (Exception ignored) {
+                // Nothing to free.
+            }
+        }
+    }
+
+    /** Which file of files/dynamic/ suits the sky right now (decided off the main thread). */
+    private volatile String dynamicPick;
+    /** A file shown on request from the computer, whatever the sky; null normally. */
+    private volatile String wallpaperTest;
+
+    private void refreshDynamicWallpaper() {
+        worker.execute(() -> {
+            String mood = DynamicWallpaper.currentMood(this);   // also keeps the weather pill fresh
+            handler.post(this::updateWeatherPill);
+            java.util.List<java.io.File> dyn = DynamicWallpaper.files(this);
+            if (dyn.isEmpty()) {
+                dynamicPick = null;
+                return;
+            }
+            java.io.File chosen = DynamicWallpaper.pick(dyn, mood);
+            final String path = chosen != null ? chosen.getAbsolutePath() : null;
+            handler.post(() -> {
+                if (path != null && !path.equals(dynamicPick) && !isDestroyed() && wallpaperTest == null) {
+                    android.util.Log.d("TVHome", "wallpaper for " + mood + ": " + path);
+                    dynamicPick = path;
+                    loadWallpaperList();
+                    if (resumed) {
+                        showNextWallpaper();
+                    }
                 }
             });
         });
@@ -8061,6 +8727,9 @@ public class MainActivity extends Activity {
     }
 
     private Bitmap decode(String source, int targetW, int targetH) {
+        if (DynamicWallpaper.isVideo(source)) {
+            return videoFrame(source, targetW, targetH);
+        }
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;

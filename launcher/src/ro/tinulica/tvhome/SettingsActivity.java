@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -122,7 +123,7 @@ public class SettingsActivity extends Activity {
         root.addView(grain, new FrameLayout.LayoutParams(-1, -1));
 
         title = text(26, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        title.setText("Setări");
+        title.setText("Réglages");
         title.setAlpha(0.92f);
         root.addView(title, at(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, px(30), 0, 0));
 
@@ -133,6 +134,35 @@ public class SettingsActivity extends Activity {
         int artTop = Math.round(screenH * 0.26f);
         art = new TvArt(this);
         root.addView(art, at(artW, artH, Gravity.TOP | Gravity.START, artCenterX - artW / 2, artTop, 0, 0));
+        // On the TV: the home screen's current wallpaper, so it shows this TV rather than an empty frame.
+        final String wallpaper = prefs.getString("wallpaper_now", null);
+        if (wallpaper != null) {
+            final int w = artW;
+            final int h = artH;
+            new Thread(() -> {
+                Bitmap still = null;
+                // A still made on the PC by sync-fonds (this TV cannot take a frame out of 4K HEVC).
+                File video = new File(wallpaper);
+                String base = video.getName().replaceFirst("\\.[^.]+$", "");
+                File made = new File(new File(video.getParentFile(), "stills"), base + ".jpg");
+                if (made.exists()) {
+                    still = BitmapFactory.decodeFile(made.getAbsolutePath());
+                }
+                File poster = MainActivity.posterFile(this, wallpaper);
+                if (still == null && poster.exists()) {
+                    BitmapFactory.Options o = new BitmapFactory.Options();
+                    o.inSampleSize = 2;
+                    still = BitmapFactory.decodeFile(poster.getAbsolutePath(), o);
+                }
+                if (still == null && new File(wallpaper).exists()) {
+                    still = MainActivity.videoFrame(wallpaper, w, h);
+                }
+                final Bitmap shown = still;
+                if (shown != null) {
+                    art.post(() -> art.setScreen(shown));
+                }
+            }, "settings-tv").start();
+        }
         description = text(13, Typeface.DEFAULT);
         description.setSingleLine(false);
         description.setMaxLines(3);
@@ -181,94 +211,97 @@ public class SettingsActivity extends Activity {
     // ------------------------------------------------------------------ content: the TV's own menu
 
     private void build() {
-        group("Televizor");
-        Category c = category("Canale și intrări", "Canalele de pe antenă, lista de canale și intrările HDMI.");
-        page(c, "Căutare canale", "Caută canalele de pe antenă, cablu sau satelit.",
+        group("Téléviseur");
+        Category c = category("Chaînes et entrées", "Les chaînes de l'antenne, la liste des chaînes et les entrées HDMI.");
+        page(c, "Recherche de chaînes", "Recherche les chaînes par antenne, câble ou satellite.",
                 componentOf("com.tcl.tv", "com.tcl.tv.scan.launch.ScanMainActivity"));
-        page(c, "Lista de canale", "Ordinea, favoritele și canalele ascunse.",
+        page(c, "Liste des chaînes", "L'ordre, les favoris et les chaînes masquées.",
                 componentOf("com.tcl.tv", "com.tcl.tv.channellist.ui.activity.ChannelManagerActivity"));
-        page(c, "Intrări", "Numele intrărilor HDMI și controlul dispozitivelor conectate (HDMI-CEC).",
+        page(c, "Entrées", "Le nom des entrées HDMI et le contrôle des appareils connectés (HDMI-CEC).",
                 component("com.tcl.settings.channel.InputControlActivity"));
 
-        c = category("Afișare și sunet", "Imaginea, sunetul, rezoluția, screensaverul și consumul.");
-        page(c, "Imagine", "Modul de imagine, luminozitatea, contrastul și culorile.",
-                component("com.tcl.settings.PictureActivity"));
-        page(c, "Sunet", "Modul de sunet, egalizatorul și ieșirea audio.", component("com.tcl.settings.SoundActivity"));
-        page(c, "Afișaj și formate", "Rezoluția, HDR și formatele audio digitale.",
+        c = category("Image et son", "L'image, le son, la résolution, l'écran de veille et la consommation.");
+        page(c, "Image", "Le mode d'image, la luminosité, le contraste et les couleurs.",
+                // TCL's page opens its panel only when asked with this action; without it, it just closes.
+                component("com.tcl.settings.PictureActivity").setAction("android.settings.DISPLAY_SETTINGS"));
+        page(c, "Son", "Le mode son, l'égaliseur et la sortie audio.", component("com.tcl.settings.SoundActivity")
+                .setAction("com.android.tv.action.VIEW_SOUND_SETTINGS"));
+        page(c, "Affichage et formats", "La résolution, le HDR et les formats audio numériques.",
                 component(".device.displaysound.DisplaySoundActivity"));
-        page(c, "Screensaver", "Ce afișează televizorul când nu este folosit.",
+        page(c, "Écran de veille", "Ce qu'affiche la TV quand elle n'est pas utilisée.",
                 component("com.google.android.tv.settings.AmbientActivity"));
-        page(c, "Economisire energie", "Oprire automată, ecran oprit și consum.",
+        page(c, "Économie d'énergie", "Arrêt automatique, écran éteint et consommation.",
                 new Intent("com.android.tv.settings.action.ENERGY_SAVING"));
 
-        group("Conexiuni");
-        c = category("Rețea și internet", "Rețeaua Wi-Fi, rețelele din jur și setările avansate.");
+        group("Connexions");
+        c = category("Réseau et internet", "Le Wi-Fi, les réseaux à proximité et les réglages avancés.");
         c.filler = this::fillWifi;
-        c = category("Telecomenzi și accesorii", "Telecomenzi, căști, boxe și controlere Bluetooth.");
+        c = category("Télécommandes et accessoires", "Télécommandes, casques, enceintes et manettes Bluetooth.");
         c.filler = this::fillBluetooth;
 
-        group("Cont și confidențialitate");
-        c = category("Conturi și conectare", "Contul Google de pe acest televizor.");
-        page(c, "Conturi și profil", "Contul Google de pe acest televizor.",
+        group("Compte et confidentialité");
+        c = category("Comptes et connexion", "Le compte Google de cette TV.");
+        page(c, "Comptes et profil", "Le compte Google de cette TV.",
                 component("com.google.android.tv.settings.AccountActivity"));
 
-        c = category("Confidențialitate", "Locația, microfonul, securitatea și anunțurile.");
-        page(c, "Locație", "Ce aplicații pot folosi locația aproximativă a televizorului.",
+        c = category("Confidentialité", "La localisation, le micro, la sécurité et la publicité.");
+        page(c, "Localisation", "Les applis qui peuvent utiliser la position approximative de la TV.",
                 new Intent("android.settings.LOCATION_SOURCE_SETTINGS"));
-        page(c, "Microfon și cameră", "Accesul aplicațiilor la microfonul telecomenzii și la cameră.",
+        page(c, "Micro et caméra", "L'accès des applis au micro de la télécommande et à la caméra.",
                 component(".privacy.SensorToggleActivity"));
-        page(c, "Securitate și restricții", "Surse necunoscute și restricții de profil.",
+        page(c, "Sécurité et restrictions", "Sources inconnues et restrictions de profil.",
                 component(".system.SecurityActivity"));
-        page(c, "Anunțuri", "ID-ul de publicitate și personalizarea anunțurilor.",
+        page(c, "Publicité", "L'identifiant publicitaire et la personnalisation des annonces.",
                 new Intent("com.google.android.gms.settings.ADS_PRIVACY"));
-        page(c, "Acces la notificări", "Aplicațiile care pot citi notificările.",
+        page(c, "Accès aux notifications", "Les applis qui peuvent lire les notifications.",
                 component(".privacy.NotificationAccessActivity"));
 
-        group("Sistem");
-        c = category("Aplicații", "Aplicațiile instalate, permisiunile și controlul parental.");
-        page(c, "Aplicații", "Permisiuni, spațiu ocupat și aplicații instalate.", component(".device.apps.AppsActivity"));
-        page(c, "Toate aplicațiile", "Inclusiv aplicațiile de sistem.", component(".device.apps.AllAppsActivity"));
-        page(c, "Instalare din surse necunoscute", "Ce aplicații pot instala alte aplicații.",
+        group("Système");
+        c = category("Applications", "Les applis installées, les autorisations et le contrôle parental.");
+        page(c, "Applications", "Autorisations, espace occupé et applis installées.", component(".device.apps.AppsActivity"));
+        page(c, "Toutes les applications", "Y compris les applis système.", component(".device.apps.AllAppsActivity"));
+        page(c, "Installation depuis des sources inconnues", "Les applis qui peuvent installer d'autres applis.",
                 component(".device.apps.specialaccess.ExternalSourcesActivity"));
-        page(c, "Picture-in-picture", "Aplicațiile care pot rula într-o fereastră mică.",
+        page(c, "Picture-in-picture", "Les applis qui peuvent s'afficher dans une petite fenêtre.",
                 component(".device.apps.specialaccess.PictureInPictureActivity"));
-        page(c, "Control parental", "Restricții pentru canale, aplicații și conținut.",
+        page(c, "Contrôle parental", "Restrictions pour les chaînes, les applis et les contenus.",
                 component("com.tcl.settings.system.ParentControlActivity"));
 
-        c = category("Sistem", "Despre, actualizări, limbă, oră, stocare și accesibilitate.");
+        c = category("Système", "À propos, mises à jour, langue, heure, stockage et accessibilité.");
         c.filler = this::fillAbout;
-        header(c, "Pagini de sistem");
-        page(c, "Despre (detalii)", "Modelul, versiunea de sistem și informații legale.", component(".about.AboutActivity"));
-        page(c, "Actualizare software", "Caută o versiune nouă a sistemului.",
+        header(c, "Pages système");
+        page(c, "À propos (détails)", "Le modèle, la version du système et les mentions légales.", component(".about.AboutActivity"));
+        page(c, "Mise à jour logicielle", "Recherche une nouvelle version du système.",
                 new Intent("android.settings.SYSTEM_UPDATE_SETTINGS"));
-        page(c, "Dată și oră", "Fusul orar și formatul orei.", new Intent(Settings.ACTION_DATE_SETTINGS));
-        page(c, "Limbă", "Limba meniurilor.", new Intent(Settings.ACTION_LOCALE_SETTINGS));
-        page(c, "Tastatură", "Tastatura de pe ecran și limbile ei.", component(".inputmethod.KeyboardActivity"));
-        page(c, "Stocare", "Spațiul folosit pe televizor.", component("com.tcl.settings.device.StorageSummaryActivity"));
-        page(c, "Accesibilitate", "Text mare, contrast ridicat, cititor de ecran.",
+        page(c, "Date et heure", "Le fuseau horaire et le format de l'heure.", new Intent(Settings.ACTION_DATE_SETTINGS));
+        page(c, "Langue", "La langue des menus.", new Intent(Settings.ACTION_LOCALE_SETTINGS));
+        page(c, "Clavier", "Le clavier à l'écran et ses langues.", component(".inputmethod.KeyboardActivity"));
+        page(c, "Stockage", "L'espace utilisé sur la TV.", component("com.tcl.settings.device.StorageSummaryActivity"));
+        page(c, "Accessibilité", "Grand texte, contraste élevé, lecteur d'écran.",
                 new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-        page(c, "Subtitrări", "Afișarea și stilul subtitrărilor.", component(".system.CaptionSetupActivity"));
-        page(c, "Sistem TCL", "Repornire, sunete de sistem, pornire rapidă și alte opțiuni TCL.",
+        page(c, "Sous-titres", "L'affichage et le style des sous-titres.", component(".system.CaptionSetupActivity"));
+        page(c, "Système TCL", "Redémarrage, sons système, démarrage rapide et autres options TCL.",
                 component("com.tcl.settings.device.SystemActivity"));
-        page(c, "Opțiuni pentru dezvoltatori", "Depanarea USB și alte opțiuni avansate.",
+        page(c, "Options pour les développeurs", "Le débogage USB et d'autres options avancées.",
                 component(".system.development.DevelopmentActivity"));
 
         group("TV Home");
-        c = category("TV Home", "Sunetele, fundalurile și restul setărilor Android.");
-        toggle(c, "Sunete de navigare", "Clicurile scurte la mutarea selecției, ca pe Apple TV.", "sounds", true);
-        toggle(c, "Ascunde manelele", "Nu apar în cardurile de deasupra barei și la Acum la TV.", "hide_manele", true);
-        toggle(c, "Vremea", "Un card animat cu vremea dimineața și când începe ploaia sau ninsoarea.",
+        c = category("TV Home", "Les sons, les fonds d'écran et le reste des réglages Android.");
+        toggle(c, "Sons de navigation", "Un petit clic quand on valide avec OK.", "sounds", false);
+        toggle(c, "Mode Cinéma avec Plex", "Propose des films et séries de ta bibliothèque Plex. Désactivé : les plateformes de streaming (clé TMDB nécessaire).",
+                "cinema_plex", true);
+        toggle(c, "Météo", "Une carte animée avec la météo le matin et quand la pluie ou la neige commence.",
                 "notify_weather", true);
-        toggle(c, "Alerte meteo", "Codurile galben, portocaliu și roșu ale ANM pentru județul tău, peste orice.",
+        toggle(c, "Vigilance météo", "Les vigilances jaune, orange et rouge de Météo-France pour ton département, par-dessus tout.",
                 "notify_alerts", true);
-        toggle(c, "Sunetul notificărilor", "Un „clink” discret de sticlă când vine o notificare sau o alertă.",
+        toggle(c, "Son des notifications", "Un « clink » de verre discret quand arrive une notification ou une alerte.",
                 "notify_sound", true);
-        toggle(c, "Animație la pornire", "Când televizorul se aprinde: inelul de sticlă, ora și ziua, apoi ecranul.",
+        toggle(c, "Animation au démarrage", "Quand la TV s'allume : l'anneau de verre, l'heure et le jour, puis l'écran.",
                 "wake_intro", true);
-        toggle(c, "Fundaluri încorporate",
-                "Pe lângă fotografiile puse cu tvtool, folosește și fundalurile din aplicație.",
+        toggle(c, "Fonds d'écran intégrés",
+                "En plus des photos ajoutées avec tvtool, utilise aussi les fonds de l'appli.",
                 "builtin_wallpapers", true);
-        page(c, "Toate setările Android", "Ecranul complet de setări al sistemului.", new Intent(Settings.ACTION_SETTINGS));
+        page(c, "Tous les réglages Android", "L'écran complet des réglages du système.", new Intent(Settings.ACTION_SETTINGS));
     }
 
     private String nextGroup;
@@ -342,15 +375,15 @@ public class SettingsActivity extends Activity {
     private void fillWifi(final Category c) {
         Connectivity.scan(this);
         List<Connectivity.Network> networks = Connectivity.networks(this);
-        header(c, "Rețeaua curentă");
+        header(c, "Réseau actuel");
         Connectivity.Network current = null;
         for (Connectivity.Network n : networks) {
             if (n.current) {
                 current = n;
             }
         }
-        info(c, current != null ? current.ssid : "Neconectat", current != null ? "Conectat  " + Connectivity.bars(current.level) : "");
-        header(c, "Rețele disponibile");
+        info(c, current != null ? current.ssid : "Non connecté", current != null ? "Connecté  " + Connectivity.bars(current.level) : "");
+        header(c, "Réseaux disponibles");
         int shown = 0;
         for (final Connectivity.Network n : networks) {
             if (n.current || shown >= 12) {
@@ -358,14 +391,14 @@ public class SettingsActivity extends Activity {
             }
             shown++;
             action(c, n.ssid, (n.secure ? "🔒 " : "") + Connectivity.bars(n.level),
-                    n.savedId >= 0 ? "Rețea salvată: se conectează direct." : n.secure ? "Cere parola." : "Rețea deschisă.",
+                    n.savedId >= 0 ? "Réseau enregistré : connexion directe." : n.secure ? "Mot de passe requis." : "Réseau ouvert.",
                     () -> Connectivity.join(this, n, () -> refresh(c)));
         }
         if (shown == 0) {
-            info(c, "Caut rețele…", "");
+            info(c, "Recherche de réseaux…", "");
         }
         header(c, "Avansat");
-        page(c, "Setări de rețea", "Adresă IP, proxy, cablu Ethernet și alte opțiuni.",
+        page(c, "Réglages réseau", "Adresse IP, proxy, câble Ethernet et autres options.",
                 new Intent(Settings.ACTION_WIFI_SETTINGS));
         // Scan results arrive a few seconds after the scan starts.
         if (!c.title.isEmpty()) {
@@ -375,32 +408,32 @@ public class SettingsActivity extends Activity {
 
     /** Bluetooth: paired devices with their state, nearby devices found live, the system pages. */
     private void fillBluetooth(final Category c) {
-        header(c, "Dispozitivele mele");
+        header(c, "Mes appareils");
         List<Connectivity.Device> paired = Connectivity.paired();
         for (final Connectivity.Device d : paired) {
-            action(c, d.name, d.connected ? "Conectat" : "Neconectat", d.kind,
+            action(c, d.name, d.connected ? "Conectat" : "Non connecté", d.kind,
                     () -> openPage(component("com.tcl.settings.accessories.AccessoriesActivity")));
         }
         if (paired.isEmpty()) {
-            info(c, Connectivity.bluetoothOn() ? "Niciun dispozitiv asociat" : "Bluetooth este oprit", "");
+            info(c, Connectivity.bluetoothOn() ? "Aucun appareil associé" : "Le Bluetooth est désactivé", "");
         }
-        header(c, "Alte dispozitive");
+        header(c, "Autres appareils");
         synchronized (found) {
             for (final Connectivity.Device d : found) {
-                action(c, d.name, "Asociază", d.kind + ". Apasă OK pentru asociere.", () -> {
+                action(c, d.name, "Associer", d.kind + ". Appuie sur OK pour l'associer.", () -> {
                     sounds.play("select");
-                    SourcesService.say(this, Connectivity.pair(d) ? "Se asociază cu " + d.name + "…"
-                            : "Nu am putut porni asocierea");
+                    SourcesService.say(this, Connectivity.pair(d) ? "Association avec " + d.name + "…"
+                            : "Impossible de lancer l'association");
                 });
             }
             if (found.isEmpty()) {
-                info(c, "Caut dispozitive în apropiere…", "");
+                info(c, "Recherche d'appareils à proximité…", "");
             }
         }
-        header(c, "Mai multe");
-        page(c, "Asociază telecomandă sau accesoriu", "Asistentul de asociere al televizorului.",
+        header(c, "Plus");
+        page(c, "Associer une télécommande ou un accessoire", "L'assistant d'association de la TV.",
                 component(".accessories.AddAccessoryActivity"));
-        page(c, "Telecomenzi și accesorii TCL", "Pagina TCL pentru telecomenzi și dispozitive.",
+        page(c, "Télécommandes et accessoires TCL", "La page TCL des télécommandes et appareils.",
                 component("com.tcl.settings.accessories.AccessoriesActivity"));
         if (stopDiscovery == null) {
             stopDiscovery = Connectivity.discover(this, d -> handler.post(() -> {
@@ -432,20 +465,20 @@ public class SettingsActivity extends Activity {
     private void fillAbout(Category c) {
         List<Item> pages = new ArrayList<>(c.items);
         c.items.clear();
-        header(c, "Despre acest televizor");
+        header(c, "À propos de cette TV");
         String name = null;
         try {
             name = Settings.Global.getString(getContentResolver(), "device_name");
         } catch (RuntimeException ignored) {
             // Unnamed.
         }
-        info(c, "Nume", name);
+        info(c, "Nom", name);
         info(c, "Model", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
         info(c, "Versiune Android", android.os.Build.VERSION.RELEASE);
-        info(c, "Rețea", Connectivity.currentSsid(this));
-        info(c, "Adresă IP", ipAddress());
+        info(c, "Réseau", Connectivity.currentSsid(this));
+        info(c, "Adresse IP", ipAddress());
         File data = android.os.Environment.getDataDirectory();
-        info(c, "Spațiu liber", String.format(Locale.getDefault(), "%.1f GB din %.1f GB",
+        info(c, "Espace libre", String.format(Locale.getDefault(), "%.1f Go sur %.1f Go",
                 data.getUsableSpace() / 1e9, data.getTotalSpace() / 1e9));
         String version = "";
         try {
@@ -455,7 +488,7 @@ public class SettingsActivity extends Activity {
         }
         info(c, "TV Home", version);
         for (Item item : pages) {
-            if (!item.header || !"Despre acest televizor".equals(item.title)) {
+            if (!item.header || !"À propos de cette TV".equals(item.title)) {
                 c.items.add(item);
             }
         }
@@ -515,7 +548,7 @@ public class SettingsActivity extends Activity {
         try {
             startActivity(new Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (RuntimeException e) {
-            SourcesService.say(this, "Pagina nu este disponibilă pe acest televizor");
+            SourcesService.say(this, "Cette page n'est pas disponible sur cette TV");
         }
     }
 
@@ -565,7 +598,7 @@ public class SettingsActivity extends Activity {
             c.onClose = null;
         }
         sounds.play("back");
-        swapTitle("Setări");
+        swapTitle("Réglages");
         rootList.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         rowOf(c.row).setSelected(false);
         c.row.requestFocus();
@@ -586,10 +619,10 @@ public class SettingsActivity extends Activity {
                     fixed.add(item);
                 }
             }
-            if (c.title.equals("Sistem")) {
+            if (c.title.equals("Système")) {
                 // About keeps its static pages; the live part is rebuilt every time.
                 c.items.clear();
-                header(c, "Pagini de sistem");
+                header(c, "Pages système");
                 for (Item item : fixed) {
                     c.items.add(item);
                 }
@@ -647,7 +680,7 @@ public class SettingsActivity extends Activity {
         if (item.toggleKey != null) {
             boolean now = !prefs.getBoolean(item.toggleKey, item.toggleDefault);
             prefs.edit().putBoolean(item.toggleKey, now).apply();
-            item.value.setText(now ? "Pornit" : "Oprit");
+            item.value.setText(now ? "Activé" : "Désactivé");
             return;
         }
         try {
@@ -656,7 +689,7 @@ public class SettingsActivity extends Activity {
             try {
                 startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (RuntimeException again) {
-                SourcesService.say(this, "Pagina nu este disponibilă pe acest televizor");
+                SourcesService.say(this, "Cette page n'est pas disponible sur cette TV");
             }
         }
     }
@@ -684,7 +717,7 @@ public class SettingsActivity extends Activity {
 
     private View addItemRow(final Item item) {
         String value = item.toggleKey != null
-                ? (prefs.getBoolean(item.toggleKey, item.toggleDefault) ? "Pornit" : "Oprit")
+                ? (prefs.getBoolean(item.toggleKey, item.toggleDefault) ? "Activé" : "Désactivé")
                 : item.valueText != null ? item.valueText : "›";
         final Row row = new Row(this, item.title, value);
         item.value = row.value;
@@ -881,8 +914,18 @@ public class SettingsActivity extends Activity {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF box = new RectF();
 
+        private Bitmap screen;
+        private final android.graphics.Rect src = new android.graphics.Rect();
+
         TvArt(Context context) {
             super(context);
+        }
+
+        void setScreen(Bitmap bitmap) {
+            screen = bitmap;
+            setAlpha(0f);
+            animate().alpha(1f).setDuration(400).start();
+            invalidate();
         }
 
         @Override
@@ -906,6 +949,18 @@ public class SettingsActivity extends Activity {
             android.graphics.Path clip = new android.graphics.Path();
             clip.addRoundRect(box, r - edge, r - edge, android.graphics.Path.Direction.CW);
             canvas.clipPath(clip);
+            if (screen != null) {
+                // Centre-crop the wallpaper to the glass.
+                float scale = Math.max(box.width() / screen.getWidth(), box.height() / screen.getHeight());
+                int sw = Math.round(box.width() / scale);
+                int sh = Math.round(box.height() / scale);
+                int sx = (screen.getWidth() - sw) / 2;
+                int sy = (screen.getHeight() - sh) / 2;
+                src.set(sx, sy, sx + sw, sy + sh);
+                paint.setShader(null);
+                paint.setFilterBitmap(true);
+                canvas.drawBitmap(screen, src, box, paint);
+            }
             paint.setShader(new LinearGradient(0, 0, w * 0.75f, h,
                     new int[]{0x26FFFFFF, 0x0FFFFFFF, 0x00FFFFFF, 0x00FFFFFF},
                     new float[]{0f, 0.38f, 0.39f, 1f}, Shader.TileMode.CLAMP));
@@ -949,7 +1004,7 @@ public class SettingsActivity extends Activity {
             if (!"select".equals(name)) {
                 return;
             }
-            if (id != null && loaded.contains(id) && prefs.getBoolean("sounds", true)) {
+            if (id != null && loaded.contains(id) && prefs.getBoolean("sounds", false)) {
                 float volume = "move".equals(name) ? 0.28f : 0.4f;
                 pool.play(id, volume, volume, 1, 0, 1f);
             }

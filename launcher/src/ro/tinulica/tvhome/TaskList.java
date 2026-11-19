@@ -67,7 +67,7 @@ final class TaskList extends LinearLayout {
             open += t.done ? 0 : 1;
         }
         TextView head = text(context, dp, 11, true);
-        head.setText(open == 0 ? "Gata pentru azi" : open == 1 ? "1 lucru de făcut" : open + " lucruri de făcut");
+        head.setText(open == 0 ? "Tout est fait pour aujourd'hui" : open == 1 ? "1 chose à faire" : open + " choses à faire");
         head.setAlpha(0.8f);
         addView(head);
         for (int i = 0; i < tasks.size(); i++) {

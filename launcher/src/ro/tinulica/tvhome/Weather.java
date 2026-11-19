@@ -82,13 +82,14 @@ final class Weather {
             }
         }
         try {
-            JSONObject o = new JSONObject(get("https://ipwho.is/?fields=success,city,region,latitude,longitude"));
+            JSONObject o = new JSONObject(get("https://ipwho.is/?fields=success,city,region,postal,latitude,longitude"));
             if (!o.optBoolean("success", true)) {
                 return null;
             }
             Place p = new Place();
-            p.city = romanian(o.optString("city", ""));
-            p.region = o.optString("region", "");
+            p.city = o.optString("city", "");
+            String dept = departement(o.optString("postal", ""));
+            p.region = dept.isEmpty() ? o.optString("region", "") : dept;
             p.lat = o.optDouble("latitude", 0);
             p.lon = o.optDouble("longitude", 0);
             if (p.lat == 0 && p.lon == 0) {
@@ -175,27 +176,27 @@ final class Weather {
 
     static String words(int code) {
         switch (code) {
-            case 0: return "Senin";
-            case 1: return "Predominant senin";
-            case 2: return "Parțial noros";
-            case 3: return "Înnorat";
-            case 45: case 48: return "Ceață";
-            case 51: case 53: case 55: return "Burniță";
-            case 56: case 57: return "Burniță înghețată";
-            case 61: return "Ploaie slabă";
-            case 63: return "Ploaie";
-            case 65: return "Ploaie puternică";
-            case 66: case 67: return "Ploaie înghețată";
-            case 71: return "Ninsoare slabă";
-            case 73: return "Ninsoare";
-            case 75: return "Ninsoare abundentă";
-            case 77: return "Fulgi mărunți";
-            case 80: return "Averse slabe";
-            case 81: return "Averse";
-            case 82: return "Averse puternice";
-            case 85: case 86: return "Averse de ninsoare";
-            case 95: return "Furtună";
-            case 96: case 99: return "Furtună cu grindină";
+            case 0: return "Ciel dégagé";
+            case 1: return "Plutôt dégagé";
+            case 2: return "Partiellement nuageux";
+            case 3: return "Couvert";
+            case 45: case 48: return "Brouillard";
+            case 51: case 53: case 55: return "Bruine";
+            case 56: case 57: return "Bruine verglaçante";
+            case 61: return "Pluie faible";
+            case 63: return "Pluie";
+            case 65: return "Forte pluie";
+            case 66: case 67: return "Pluie verglaçante";
+            case 71: return "Neige faible";
+            case 73: return "Neige";
+            case 75: return "Fortes chutes de neige";
+            case 77: return "Grésil";
+            case 80: return "Faibles averses";
+            case 81: return "Averses";
+            case 82: return "Fortes averses";
+            case 85: case 86: return "Averses de neige";
+            case 95: return "Orage";
+            case 96: case 99: return "Orage avec grêle";
             default: return "";
         }
     }
@@ -230,14 +231,14 @@ final class Weather {
         int from = group(was);
         int to = group(code);
         switch (to) {
-            case 5: return "Vine furtuna";
-            case 4: return "Începe să ningă";
-            case 3: return from == 4 ? "Ninsoarea trece în ploaie" : "Începe să plouă";
-            case 2: return "S-a lăsat ceața";
-            case 1: return from == 3 ? "S-a oprit ploaia" : from == 4 ? "S-a oprit ninsoarea"
-                    : from == 5 ? "Furtuna a trecut" : "S-a înnorat";
-            default: return from == 3 ? "S-a oprit ploaia" : from == 4 ? "S-a oprit ninsoarea"
-                    : from == 5 ? "Furtuna a trecut" : "Se înseninează";
+            case 5: return "L'orage arrive";
+            case 4: return "Il commence à neiger";
+            case 3: return from == 4 ? "La neige se change en pluie" : "Il commence à pleuvoir";
+            case 2: return "Le brouillard est tombé";
+            case 1: return from == 3 ? "La pluie s'est arrêtée" : from == 4 ? "La neige s'est arrêtée"
+                    : from == 5 ? "L'orage est passé" : "Le ciel s'est couvert";
+            default: return from == 3 ? "La pluie s'est arrêtée" : from == 4 ? "La neige s'est arrêtée"
+                    : from == 5 ? "L'orage est passé" : "Le ciel se dégage";
         }
     }
 
@@ -247,9 +248,9 @@ final class Weather {
     static List<Alert> alerts(Place place) {
         List<Alert> out = new ArrayList<>();
         try {
-            JSONArray warnings = new JSONObject(get("https://feeds.meteoalarm.org/api/v1/warnings/feeds-romania"))
+            JSONArray warnings = new JSONObject(get("https://feeds.meteoalarm.org/api/v1/warnings/feeds-france"))
                     .optJSONArray("warnings");
-            String county = plain(place.region).replace("judetul", "").replace("county", "").trim();
+            String county = area(place.region);
             long now = System.currentTimeMillis();
             SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ROOT);
             for (int i = 0; warnings != null && i < warnings.length(); i++) {
@@ -257,14 +258,14 @@ final class Weather {
                 JSONArray infos = alert != null ? alert.optJSONArray("info") : null;
                 for (int j = 0; infos != null && j < infos.length(); j++) {
                     JSONObject info = infos.getJSONObject(j);
-                    if (!info.optString("language").startsWith("ro")) {
+                    if (!info.optString("language").startsWith("fr")) {
                         continue;
                     }
                     String where = null;
                     JSONArray areas = info.optJSONArray("area");
                     for (int k = 0; areas != null && k < areas.length(); k++) {
                         String a = areas.getJSONObject(k).optString("areaDesc");
-                        if (!county.isEmpty() && plain(a).contains(county)) {
+                        if (!county.isEmpty() && area(a).equals(county)) {
                             where = a;
                         }
                     }
@@ -310,19 +311,19 @@ final class Weather {
 
     static String alertName(int type) {
         switch (type) {
-            case 1: return "Vânt puternic";
-            case 2: return "Ninsori și polei";
-            case 3: return "Furtuni";
-            case 4: return "Ceață";
-            case 5: return "Caniculă";
-            case 6: return "Ger";
-            case 7: return "Fenomene costiere";
-            case 8: return "Incendii de vegetație";
-            case 9: return "Avalanșe";
-            case 10: return "Ploi abundente";
-            case 12: return "Inundații";
-            case 13: return "Ploi și inundații";
-            default: return "Fenomene periculoase";
+            case 1: return "Vent violent";
+            case 2: return "Neige-verglas";
+            case 3: return "Orages";
+            case 4: return "Brouillard";
+            case 5: return "Canicule";
+            case 6: return "Grand froid";
+            case 7: return "Vagues-submersion";
+            case 8: return "Feux de forêt";
+            case 9: return "Avalanches";
+            case 10: return "Pluie-inondation";
+            case 12: return "Crues";
+            case 13: return "Pluie-inondation";
+            default: return "Phénomènes dangereux";
         }
     }
 
@@ -343,7 +344,7 @@ final class Weather {
     }
 
     static String alertLevel(int level) {
-        return level >= 4 ? "COD ROȘU" : level == 3 ? "COD PORTOCALIU" : "COD GALBEN";
+        return level >= 4 ? "VIGILANCE ROUGE" : level == 3 ? "VIGILANCE ORANGE" : "VIGILANCE JAUNE";
     }
 
     /** "până la 21:00" today, "până mâine, 08:00", or the day's name further away. */
@@ -355,12 +356,12 @@ final class Weather {
         int days = e.get(Calendar.DAY_OF_YEAR) - c.get(Calendar.DAY_OF_YEAR)
                 + 365 * (e.get(Calendar.YEAR) - c.get(Calendar.YEAR));
         if (days <= 0) {
-            return "până la " + hour;
+            return "jusqu'à " + hour;
         }
         if (days == 1) {
-            return "până mâine, " + hour;
+            return "jusqu'à demain, " + hour;
         }
-        return "până " + new SimpleDateFormat("EEEE", new Locale("ro")).format(e.getTime()) + ", " + hour;
+        return "jusqu'à " + new SimpleDateFormat("EEEE", Locale.FRENCH).format(e.getTime()) + ", " + hour;
     }
 
     // ------------------------------------------------------------------ helpers
@@ -382,6 +383,39 @@ final class Weather {
             }
         }
         return city;
+    }
+
+    /** A département's name from a French postal code ("14000" → "Calvados"), or "" outside France. */
+    static String departement(String postal) {
+        String p = postal == null ? "" : postal.trim();
+        if (p.length() < 2 || !Character.isDigit(p.charAt(0)) || !Character.isDigit(p.charAt(1))) {
+            return "";
+        }
+        int n = Integer.parseInt(p.substring(0, 2));
+        if (n == 20) {
+            return p.length() >= 3 && p.charAt(2) <= '1' ? "Corse-du-Sud" : "Haute-Corse";
+        }
+        return n >= 1 && n < DEPARTEMENTS.length ? DEPARTEMENTS[n] : "";
+    }
+
+    private static final String[] DEPARTEMENTS = {"",
+            "Ain", "Aisne", "Allier", "Alpes-de-Haute-Provence", "Hautes-Alpes", "Alpes-Maritimes", "Ardèche",
+            "Ardennes", "Ariège", "Aube", "Aude", "Aveyron", "Bouches-du-Rhône", "Calvados", "Cantal", "Charente",
+            "Charente-Maritime", "Cher", "Corrèze", "", "Côte-d'Or", "Côtes-d'Armor", "Creuse", "Dordogne", "Doubs",
+            "Drôme", "Eure", "Eure-et-Loir", "Finistère", "Gard", "Haute-Garonne", "Gers", "Gironde", "Hérault",
+            "Ille-et-Vilaine", "Indre", "Indre-et-Loire", "Isère", "Jura", "Landes", "Loir-et-Cher", "Loire",
+            "Haute-Loire", "Loire-Atlantique", "Loiret", "Lot", "Lot-et-Garonne", "Lozère", "Maine-et-Loire",
+            "Manche", "Marne", "Haute-Marne", "Mayenne", "Meurthe-et-Moselle", "Meuse", "Morbihan", "Moselle",
+            "Nièvre", "Nord", "Oise", "Orne", "Pas-de-Calais", "Puy-de-Dôme", "Pyrénées-Atlantiques",
+            "Hautes-Pyrénées", "Pyrénées-Orientales", "Bas-Rhin", "Haut-Rhin", "Rhône", "Haute-Saône",
+            "Saône-et-Loire", "Sarthe", "Savoie", "Haute-Savoie", "Paris", "Seine-Maritime", "Seine-et-Marne",
+            "Yvelines", "Deux-Sèvres", "Somme", "Tarn", "Tarn-et-Garonne", "Var", "Vaucluse", "Vendée", "Vienne",
+            "Haute-Vienne", "Vosges", "Yonne", "Territoire de Belfort", "Essonne", "Hauts-de-Seine",
+            "Seine-Saint-Denis", "Val-de-Marne", "Val-d'Oise"};
+
+    /** A place name reduced for comparing: "Côtes d'Armor" and "Côtes-d'Armor" both give "cotes d armor". */
+    private static String area(String s) {
+        return plain(s).replaceAll("[^a-z0-9]+", " ").trim();
     }
 
     private static String plain(String s) {

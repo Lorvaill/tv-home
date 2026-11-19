@@ -89,14 +89,13 @@ public final class SourceActivity extends Activity {
             @Override
             public void onVideoUnavailable(String id, int reason) {
                 if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING) {
-                    showWaiting(true, t("Se conectează…", "Connecting…"), null);
+                    showWaiting(true, "Connexion…", null);
                 } else if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_WEAK_SIGNAL) {
-                    showWaiting(true, t("Semnal slab", "Weak signal"),
-                            t("Verifică cablul HDMI.", "Check the HDMI cable."));
+                    showWaiting(true, "Signal faible",
+                            "Vérifie le câble HDMI.");
                 } else {
-                    showWaiting(true, t("Se așteaptă semnal", "Waiting for a signal"),
-                            t("Pornește dispozitivul sau verifică cablul HDMI.",
-                                    "Turn the device on or check the HDMI cable."));
+                    showWaiting(true, "En attente du signal",
+                            "Allume l'appareil ou vérifie le câble HDMI.");
                 }
             }
 
@@ -139,7 +138,7 @@ public final class SourceActivity extends Activity {
         }
         ((TextView) banner.findViewWithTag("name")).setText(name);
         ((TextView) waiting.findViewWithTag("name")).setText(name);
-        showWaiting(true, t("Se conectează…", "Connecting…"), null);
+        showWaiting(true, "Connexion…", null);
         try {
             tv.tune(id, TvContract.buildChannelUriForPassthroughInput(id));
         } catch (RuntimeException e) {
@@ -198,8 +197,7 @@ public final class SourceActivity extends Activity {
         screen.addView(column, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         TextView hint = text(11, false);
         hint.setAlpha(0.45f);
-        hint.setText(t("Înapoi: ecranul principal   ·   Surse: alt dispozitiv",
-                "Back: home screen   ·   Input: another device"));
+        hint.setText("Retour : écran d'accueil   ·   Sources : autre appareil");
         screen.addView(hint, new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL) {
             {
                 bottomMargin = px(34);

@@ -122,20 +122,20 @@ final class Clawd extends View implements Choreographer.FrameCallback {
             m = has(w, "aprob", "permisiune", "approve", "permission", "urgent") ? Mood.ATTENTION : Mood.QUESTION;
         }
         if (m == null) {
-            if (has(w, "eroare", "nu am putut", "nu merge", "problem", "atenț", "atent", "error", "fail",
+            if (has(w, "erreur", "impossible", "échec", "besoin", "il faut", "eroare", "nu am putut", "nu merge", "problem", "atenț", "atent", "error", "fail",
                     "ai nevoie", "am nevoie", "trebuie să", "need")) {
                 m = Mood.ATTENTION;
-            } else if (has(w, "mulțum", "multum", "thank", "❤", "♥")) {
+            } else if (has(w, "merci", "mulțum", "multum", "thank", "❤", "♥")) {
                 m = Mood.LOVE;
-            } else if (has(w, "noapte bună", "somn", "good night", "sleep", "pauză", "pauza")) {
+            } else if (has(w, "bonne nuit", "dodo", "noapte bună", "somn", "good night", "sleep", "pauză", "pauza")) {
                 m = Mood.SLEEP;
-            } else if (has(w, "lucrez", "în lucru", "in lucru", "pornesc", "încep", "incep", "generez",
+            } else if (has(w, "en cours", "je travaille", "je lance", "je commence", "lucrez", "în lucru", "in lucru", "pornesc", "încep", "incep", "generez",
                     "construiesc", "working", "building", "starting", "în curs", "durează")) {
                 m = Mood.WORKING;
-            } else if (has(w, "gata", "terminat", "am terminat", "reușit", "reusit", "done", "finished",
+            } else if (has(w, "terminé", "fini", "c'est fait", "réussi", "installé", "gata", "terminat", "am terminat", "reușit", "reusit", "done", "finished",
                     "complet", "✓", "e pe televizor", "rulează", "merge", "instalat")) {
                 m = Mood.DONE;
-            } else if (has(w, "salut", "bună", "buna ", "hello", "hi ", "hey")) {
+            } else if (has(w, "bonjour", "coucou", "salut", "bună", "buna ", "hello", "hi ", "hey")) {
                 m = Mood.HELLO;
             }
         }

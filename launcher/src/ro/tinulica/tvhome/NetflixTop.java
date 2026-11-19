@@ -28,12 +28,12 @@ final class NetflixTop {
     private static final long FRESH = 12 * 3600_000L;
     /** page, row name, program type (0 film, 1 series) */
     private static final String[][] PAGES = {
-            {"https://www.netflix.com/tudum/top10/romania/tv", "Top 10 seriale în România", "1"},
-            {"https://www.netflix.com/tudum/top10/romania", "Top 10 filme în România", "0"},
-            {"https://www.netflix.com/tudum/top10/tv", "Top 10 seriale în lume", "1"},
-            {"https://www.netflix.com/tudum/top10", "Top 10 filme în lume", "0"},
-            {"https://www.netflix.com/tudum/top10/non-english/tv", "Seriale din toată lumea", "1"},
-            {"https://www.netflix.com/tudum/top10/non-english", "Filme din toată lumea", "0"},
+            {"https://www.netflix.com/tudum/top10/france/tv", "Top 10 séries en France", "1"},
+            {"https://www.netflix.com/tudum/top10/france", "Top 10 films en France", "0"},
+            {"https://www.netflix.com/tudum/top10/tv", "Top 10 séries dans le monde", "1"},
+            {"https://www.netflix.com/tudum/top10", "Top 10 films dans le monde", "0"},
+            {"https://www.netflix.com/tudum/top10/non-english/tv", "Séries du monde entier", "1"},
+            {"https://www.netflix.com/tudum/top10/non-english", "Films du monde entier", "0"},
     };
     private static final Pattern CARD = Pattern.compile(
             "data-uia=\"top10-card\"[^>]*style=\"background-image:url\\(([^)]+)\\)");

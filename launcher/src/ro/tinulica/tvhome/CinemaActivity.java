@@ -82,7 +82,8 @@ import java.util.regex.Pattern;
  *   you, popular now, choose again, subscriptions; top right "Cinema mode" with the profile,
  *   which also leaves Cinema. Home asks before leaving.
  *
- * Data: TMDB (watch providers for Romania come from JustWatch); app ids from Wikidata.
+ * Data: TMDB (watch providers for France come from JustWatch); app ids from Wikidata.
+ * Or, when Plex is set up, the Plex library itself (PlexCinema).
  */
 public final class CinemaActivity extends Activity {
 
@@ -129,8 +130,9 @@ public final class CinemaActivity extends Activity {
             new Provider(8, "com.netflix.ninja", "Netflix"),
             new Provider(337, "com.disney.disneyplus", "Disney+"),
             new Provider(1899, "com.wbd.stream", "HBO Max"),
+            new Provider(381, "com.canal.android.canal", "Canal+"),
+            new Provider(350, "com.apple.atve.androidtv.appletv", "Apple TV+"),
             new Provider(119, "com.amazon.amazonvideo.livingroom", "Prime Video"),
-            new Provider(1773, "com.skyshowtime.skyshowtime.google", "SkyShowtime"),
             new Provider(283, "com.crunchyroll.crunchyroid", "Crunchyroll"),
     };
 
@@ -163,30 +165,30 @@ public final class CinemaActivity extends Activity {
 
     /** Who is watching: value, words, picture, the genres of its background still. */
     private static final String[][] WHO = {
-            {"solo", "Doar eu", "popcorn", "53|18"},
-            {"couple", "În doi", "hearts", "10749"},
-            {"kids", "Cu copiii", "teddy", "16|10751"},
-            {"family", "În familie", "house", "10751"},
-            {"friends", "Cu prietenii", "party", "35"},
+            {"solo", "Juste moi", "popcorn", "53|18"},
+            {"couple", "À deux", "hearts", "10749"},
+            {"kids", "Avec les enfants", "teddy", "16|10751"},
+            {"family", "En famille", "house", "10751"},
+            {"friends", "Entre amis", "party", "35"},
     };
     /** Moods: label, film genres, series genres (TMDB ids; "|" is or), picture. */
     private static final String[][] MOODS = {
-            {"Să râdem", "35", "35", "laugh"},
-            {"Acțiune", "28|12", "10759", "collision"},
-            {"Suspans", "53|9648|80", "9648|80", "detective"},
-            {"Ceva emoționant", "18|10749", "18", "tears"},
-            {"Groază", "27", null, "ghost"},
-            {"SF și fantasy", "878|14", "10765", "rocket"},
-            {"Povești adevărate", "99|36", "99", "globe"},
-            {"Animație", "16", "16", "palette"},
-            {"Surprinde-mă", "", "", "die"},
+            {"Rire", "35", "35", "laugh"},
+            {"Action", "28|12", "10759", "collision"},
+            {"Suspense", "53|9648|80", "9648|80", "detective"},
+            {"Émouvant", "18|10749", "18", "tears"},
+            {"Horreur", "27", null, "ghost"},
+            {"SF et fantasy", "878|14", "10765", "rocket"},
+            {"Histoires vraies", "99|36", "99", "globe"},
+            {"Animation", "16", "16", "palette"},
+            {"Surprends-moi", "", "", "die"},
     };
     private static final String[][] KID_MOODS = {
-            {"Animație", "16", "16", "palette"},
-            {"Aventură", "12", "10759", "map"},
-            {"Să râdem", "35", "35", "laugh"},
+            {"Animation", "16", "16", "palette"},
+            {"Aventure", "12", "10759", "map"},
+            {"Rire", "35", "35", "laugh"},
             {"Magie", "14", "10765", "wand"},
-            {"Surprinde-mă", "", "", "die"},
+            {"Surprends-moi", "", "", "die"},
     };
 
     private static final int INTRO = 0;
@@ -254,6 +256,8 @@ public final class CinemaActivity extends Activity {
     private android.webkit.WebView video;
 
     private int screen = INTRO;
+    /** Cinema on the Plex library (see PlexCinema) instead of the streaming platforms. */
+    private boolean plex;
     private int step;
     private boolean askSubs;
     private final Set<Integer> subs = new LinkedHashSet<>();
@@ -423,7 +427,7 @@ public final class CinemaActivity extends Activity {
         buildBadge();
 
         credit = text(9.5f, false);
-        credit.setText("Date: TMDB · Disponibilitate în România: JustWatch");
+        credit.setText("Données : TMDB · Disponibilité en France : JustWatch");
         credit.setAlpha(0f);
         root.addView(credit, at(-2, -2, Gravity.BOTTOM | Gravity.END, 0, 0, px(24), px(12)));
 
@@ -589,7 +593,7 @@ public final class CinemaActivity extends Activity {
         CinemaMark.Spin spin = new CinemaMark.Spin(this);
         badgeCapsule.addView(spin, new LinearLayout.LayoutParams(px(20), px(20)));
         badgeText = text(13.5f, true);
-        badgeText.setText("Mod Cinema");
+        badgeText.setText("Mode Cinéma");
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
         tlp.leftMargin = px(7);
         badgeCapsule.addView(badgeText, tlp);
@@ -614,7 +618,7 @@ public final class CinemaActivity extends Activity {
         badge.setOnFocusChangeListener((v, has) -> {
             badgeGlass.setTint(has ? 0xF2FFFFFF : 0x29FFFFFF);
             badgeText.setTextColor(has ? 0xFF111111 : Color.WHITE);
-            badgeText.setText(has ? "Ieși din Cinema" : "Mod Cinema");
+            badgeText.setText(has ? "Quitter Cinéma" : "Mode Cinéma");
             lift.to(has ? 1f : 0f);
         });
         badge.setOnClickListener(v -> {
@@ -636,7 +640,7 @@ public final class CinemaActivity extends Activity {
 
     // ------------------------------------------------------------------ the tab bar
 
-    private static final String[] TABS = {"Pentru voi", "Populare acum", "Altă alegere", "Abonamente"};
+    private static final String[] TABS = {"Pour vous", "Populaires", "Autre choix", "Abonnements"};
 
     /** One centred Liquid Glass capsule, the highlight gliding between the tabs (Apple TV app). */
     private void buildTabs() {
@@ -690,6 +694,16 @@ public final class CinemaActivity extends Activity {
                 if (index == 2) {
                     answers.clear();
                     showStep(1, true);
+                } else if (index == 3 && plex) {
+                    // On Plex this tab goes over to the streaming platforms (TMDB).
+                    if (!tmdb.ready()) {
+                        message("Le streaming a besoin d'une clé TMDB",
+                                "Sur l'ordinateur, lance :  python tvtool.py tmdb\nLa clé est gratuite, sur themoviedb.org.",
+                                null);
+                        return;
+                    }
+                    prefs.edit().putBoolean("cinema_plex", false).apply();
+                    begin(getIntent());
                 } else if (index == 3) {
                     askSubs = true;
                     showStep(0, true);
@@ -811,9 +825,17 @@ public final class CinemaActivity extends Activity {
         curtain.setAlpha(0f);
         showAvatar();
         loadSubs();
+        plex = PlexCinema.on(this);
+        credit.setText(plex ? "Ta bibliothèque Plex" : "Données : TMDB · Disponibilité en France : JustWatch");
+        ((TextView) tabs.getChildAt(3)).setText(plex ? "Streaming" : TABS[3]);
+        if (plex) {
+            net.execute(this::loadPlexLobby);
+            intro();
+            return;
+        }
         if (!tmdb.ready()) {
-            message("Cinema are nevoie de o cheie TMDB",
-                    "Pe calculator rulează:  python tvtool.py tmdb\nCheia e gratuită, de pe themoviedb.org.", null);
+            message("Cinéma a besoin d'une clé TMDB",
+                    "Sur l'ordinateur, lance :  python tvtool.py tmdb\nLa clé est gratuite, sur themoviedb.org.", null);
             return;
         }
         net.execute(this::loadLobby);
@@ -844,7 +866,7 @@ public final class CinemaActivity extends Activity {
             return;
         }
         badge.animate().alpha(1f).setDuration(600).start();
-        askSubs = subs.isEmpty() || tempSubs;
+        askSubs = !plex && (subs.isEmpty() || tempSubs);
         showStep(askSubs ? 0 : 1, true);
         lobbyTick.run();
     }
@@ -896,7 +918,7 @@ public final class CinemaActivity extends Activity {
      * warm gradient, with a glow behind and a band of light passing over it.
      */
     private final class LogoView extends View {
-        private static final String FIRST = "Mod Cinema";
+        private static final String FIRST = "Mode Cinéma";
         private static final String SECOND = "activ";
         private final Paint white = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
         private final Paint colour = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
@@ -1034,9 +1056,18 @@ public final class CinemaActivity extends Activity {
         }
     }
 
+    /** Behind the questions on Plex: backgrounds from the library. */
+    private void loadPlexLobby() {
+        final List<String> stills = PlexCinema.stills(this, 8);
+        handler.post(() -> {
+            lobby.clear();
+            lobby.addAll(stills);
+        });
+    }
+
     private void loadLobby() {
         try {
-            JSONObject week = tmdb.get("/trending/all/week", "language=ro-RO", 12 * HOUR);
+            JSONObject week = tmdb.get("/trending/all/week", "language=fr-FR", 12 * HOUR);
             JSONArray results = week.optJSONArray("results");
             List<String> stills = new ArrayList<>();
             for (int i = 0; results != null && i < results.length() && stills.size() < 8; i++) {
@@ -1049,7 +1080,7 @@ public final class CinemaActivity extends Activity {
                 lobby.clear();
                 lobby.addAll(stills);
             });
-            JSONObject list = tmdb.get("/watch/providers/movie", "watch_region=RO&language=ro-RO", 7 * 24 * HOUR);
+            JSONObject list = tmdb.get("/watch/providers/movie", "watch_region=FR&language=fr-FR", 7 * 24 * HOUR);
             JSONArray all = list.optJSONArray("results");
             Map<Integer, String> logos = new HashMap<>();
             for (int i = 0; all != null && i < all.length(); i++) {
@@ -1106,8 +1137,8 @@ public final class CinemaActivity extends Activity {
                         options.add(new String[]{String.valueOf(p.id), p.name, p.pkg});
                     }
                 }
-                swapStage(question("Pe ce platforme aveți abonament?",
-                        "Am bifat aplicațiile în care pari conectat. Schimbă cu OK, apoi Continuă.", options, true, v -> {
+                swapStage(question("À quelles plateformes êtes-vous abonnés ?",
+                        "J'ai coché les applis où tu sembles connecté. Change avec OK, puis Continuer.", options, true, v -> {
                             if (!forYou.isEmpty() && who != null) {
                                 search();
                             } else {
@@ -1120,7 +1151,7 @@ public final class CinemaActivity extends Activity {
                 for (String[] w : WHO) {
                     options.add(new String[]{w[0], w[1], w[2]});
                 }
-                swapStage(question("Cine se uită în seara asta?", "Alegem altceva pentru copii decât pentru prieteni.",
+                swapStage(question("Qui regarde ce soir ?", "On ne choisit pas la même chose pour des enfants que pour des amis.",
                         options, false, v -> {
                             who = v;
                             answers.clear();
@@ -1131,11 +1162,11 @@ public final class CinemaActivity extends Activity {
             }
             case 2: {
                 options.add(new String[]{"movie", "Un film", "clapper"});
-                options.add(new String[]{"tv", "Un serial", "television"});
-                swapStage(question("Film sau serial?", "", options, false, v -> {
+                options.add(new String[]{"tv", "Une série", "television"});
+                swapStage(question("Film ou série ?", "", options, false, v -> {
                     kind = v;
                     trimAnswers(1);
-                    answers.add(new String[]{v, "movie".equals(v) ? "Film" : "Serial", "movie".equals(v) ? "clapper" : "television"});
+                    answers.add(new String[]{v, "movie".equals(v) ? "Film" : "Série", "movie".equals(v) ? "clapper" : "television"});
                     showStep(3, true);
                 }), forward, true);
                 break;
@@ -1146,12 +1177,12 @@ public final class CinemaActivity extends Activity {
                     if ("tv".equals(kind) && m[2] == null) {
                         continue;
                     }
-                    if ("Groază".equals(m[0]) && "family".equals(who)) {
+                    if ("Horreur".equals(m[0]) && "family".equals(who)) {
                         continue;
                     }
                     options.add(new String[]{m[0], m[0], m[3]});
                 }
-                swapStage(question("Ce chef aveți?", "", options, false, v -> {
+                swapStage(question("Vous êtes d'humeur à quoi ?", "", options, false, v -> {
                     for (String[] m : moods) {
                         if (m[0].equals(v)) {
                             mood = m;
@@ -1166,15 +1197,15 @@ public final class CinemaActivity extends Activity {
             default: {
                 boolean tv = "tv".equals(kind);
                 if (tv) {
-                    options.add(new String[]{"new", "Ceva nou", "sparkles"});
-                    options.add(new String[]{"any", "Oricând", "calendar"});
-                    options.add(new String[]{"classic", "Un clasic", "frames"});
+                    options.add(new String[]{"new", "Du récent", "sparkles"});
+                    options.add(new String[]{"any", "Peu importe", "calendar"});
+                    options.add(new String[]{"classic", "Un classique", "frames"});
                 } else {
-                    options.add(new String[]{"short", "Sub o oră și jumătate", "stopwatch"});
-                    options.add(new String[]{"two", "Cam două ore", "hourglass"});
-                    options.add(new String[]{"any", "Oricât", "infinity"});
+                    options.add(new String[]{"short", "Moins d'une heure et demie", "stopwatch"});
+                    options.add(new String[]{"two", "Environ deux heures", "hourglass"});
+                    options.add(new String[]{"any", "Peu importe", "infinity"});
                 }
-                swapStage(question(tv ? "Ceva nou sau un clasic?" : "Cât timp aveți?", "", options, false, v -> {
+                swapStage(question(tv ? "Du récent ou un classique ?" : "Combien de temps avez-vous ?", "", options, false, v -> {
                     span = v;
                     trimAnswers(3);
                     search();
@@ -1280,7 +1311,7 @@ public final class CinemaActivity extends Activity {
             }
             final OptionCard card;
             if (done) {
-                card = new OptionCard("Continuă", null, null);
+                card = new OptionCard("Continuer", null, null);
                 card.setOnClickListener(v -> {
                     if (subs.isEmpty()) {
                         card.shake();
@@ -1499,6 +1530,10 @@ public final class CinemaActivity extends Activity {
 
     /** The still behind an answer: something popular of that kind on your subscriptions. */
     private void prefetchStill(final String key, final String value) {
+        if (plex) {
+            plexStill(key, value);
+            return;
+        }
         if (optionStills.containsKey(key) || subs.isEmpty()) {
             return;
         }
@@ -1521,10 +1556,10 @@ public final class CinemaActivity extends Activity {
                 }
                 if (at == 2 || genres == null || genres.isEmpty()) {
                     String k = at == 2 ? value : forKind;
-                    JSONArray r = tmdb.get("/trending/" + k + "/week", "language=ro-RO", 12 * HOUR).optJSONArray("results");
+                    JSONArray r = tmdb.get("/trending/" + k + "/week", "language=fr-FR", 12 * HOUR).optJSONArray("results");
                     path = firstBackdrop(r, at == 2 ? 0 : at + 2);
                 } else {
-                    JSONArray r = tmdb.get("/discover/" + forKind, "language=ro-RO&watch_region=RO"
+                    JSONArray r = tmdb.get("/discover/" + forKind, "language=fr-FR&watch_region=FR"
                             + "&with_watch_monetization_types=flatrate&sort_by=popularity.desc&vote_count.gte=200"
                             + "&with_watch_providers=" + Uri.encode(TextUtils.join("|", subs))
                             + "&with_genres=" + Uri.encode(genres), 12 * HOUR).optJSONArray("results");
@@ -1543,6 +1578,31 @@ public final class CinemaActivity extends Activity {
                 }
             } catch (IOException ignored) {
                 // The lobby stays.
+            }
+        });
+    }
+
+    /** prefetchStill on Plex: a background from the library that fits the option. */
+    private void plexStill(final String key, final String value) {
+        if (optionStills.containsKey(key)) {
+            return;
+        }
+        optionStills.put(key, "");
+        final int at = step;
+        final String forWho = at == 1 ? value : who;
+        final String forKind = at == 2 ? value : kind;
+        final String forMood = at == 3 ? value : null;
+        net.execute(() -> {
+            final String found = PlexCinema.stillFor(this, forWho, forKind, forMood);
+            if (found != null) {
+                handler.post(() -> {
+                    optionStills.put(key, found);
+                    picture(found, "w780", 780, false, b -> {
+                        if (key.equals(focusedOption)) {
+                            optionStill.run();
+                        }
+                    });
+                });
             }
         });
     }
@@ -1761,7 +1821,7 @@ public final class CinemaActivity extends Activity {
         group.setGravity(Gravity.CENTER_HORIZONTAL);
         group.addView(new Ring(), new LinearLayout.LayoutParams(px(48), px(48)));
         TextView words = text(17, true);
-        words.setText("Caut ceva bun pentru voi…");
+        words.setText("Je cherche quelque chose de bien pour vous…");
         LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(-2, -2);
         wlp.topMargin = px(20);
         group.addView(words, wlp);
@@ -1777,9 +1837,24 @@ public final class CinemaActivity extends Activity {
             final List<Title> found = new ArrayList<>();
             String failed = null;
             try {
+                if (plex) {
+                    List<String> seen = new ArrayList<>();
+                    Collections.addAll(seen, prefs.getString(Profiles.scoped(prefs, KEY_SEEN), "").split(","));
+                    found.addAll(PlexCinema.search(this, who, kind, mood != null ? mood[0] : null, span, seen, 12));
+                    for (Title t : found) {
+                        seen.remove("p" + t.id);
+                        seen.add(0, "p" + t.id);
+                    }
+                    while (seen.size() > 80) {
+                        seen.remove(seen.size() - 1);
+                    }
+                    prefs.edit().putString(Profiles.scoped(prefs, KEY_SEEN), TextUtils.join(",", seen)).apply();
+                    preloadLogos(found);
+                    throw new Done();
+                }
                 boolean tv = "tv".equals(kind);
                 Set<Integer> trending = new HashSet<>();
-                JSONArray week = tmdb.get("/trending/" + kind + "/week", "language=ro-RO", 12 * HOUR).optJSONArray("results");
+                JSONArray week = tmdb.get("/trending/" + kind + "/week", "language=fr-FR", 12 * HOUR).optJSONArray("results");
                 for (int i = 0; week != null && i < week.length(); i++) {
                     trending.add(week.optJSONObject(i).optInt("id"));
                 }
@@ -1801,8 +1876,12 @@ public final class CinemaActivity extends Activity {
                     }
                 }
                 rank(found, trending, 12);
+            } catch (Done done) {
+                // Plex answered.
             } catch (IOException e) {
                 failed = e.getMessage();
+            } catch (Exception e) {
+                failed = String.valueOf(e);
             }
             final String error = failed;
             long wait = Math.max(0, 1600 - (System.currentTimeMillis() - started));
@@ -1811,10 +1890,13 @@ public final class CinemaActivity extends Activity {
                     return;
                 }
                 if (error != null) {
-                    message("Nu am putut ajunge la TMDB", "Verifică internetul și încearcă din nou.", this::search);
+                    message(plex ? "Impossible de joindre Plex" : "Impossible de joindre TMDB",
+                            plex ? "Vérifie que le serveur Plex est allumé, puis réessaie." : "Vérifie internet et réessaie.",
+                            this::search);
                 } else if (found.isEmpty()) {
-                    message("N-am găsit nimic pe platformele voastre",
-                            "Încearcă alt chef sau alege și alte abonamente.", () -> showStep(3, false));
+                    message(plex ? "Rien trouvé dans ta bibliothèque" : "Rien trouvé sur vos plateformes",
+                            plex ? "Essaie une autre humeur." : "Essaie une autre humeur ou ajoute d'autres abonnements.",
+                            () -> showStep(3, false));
                 } else {
                     forYou.clear();
                     forYou.addAll(found);
@@ -1826,13 +1908,32 @@ public final class CinemaActivity extends Activity {
         });
     }
 
+    /** Ends the TMDB path of search() once Plex has answered. */
+    private static final class Done extends RuntimeException {
+    }
+
+    /** The titles' logos, ready before the results show (TMDB's come with the details). */
+    private void preloadLogos(List<Title> list) {
+        for (Title t : list) {
+            if (t.logo == null || pictures.get("w500" + t.logo) != null) {
+                continue;
+            }
+            Bitmap big = tmdb.image(t.logo, "w500", 500);
+            if (big != null) {
+                pictures.put("w500" + t.logo, big);
+                pictures.put("w300" + t.logo, Bitmap.createScaledBitmap(big, Math.max(1, big.getWidth() * 3 / 5),
+                        Math.max(1, big.getHeight() * 3 / 5), true));
+            }
+        }
+    }
+
     /**
      * The TMDB query for the answers. Animation only for children or when asked for; no
      * documentaries, reality or talk shows unless asked for; only titles enough people rated.
      */
     private String discover(int relax, int page) {
         boolean tv = "tv".equals(kind);
-        StringBuilder q = new StringBuilder("language=ro-RO&watch_region=RO&include_adult=false"
+        StringBuilder q = new StringBuilder("language=fr-FR&watch_region=FR&include_adult=false"
                 + "&with_watch_monetization_types=flatrate&sort_by=popularity.desc&vote_average.gte=6.2");
         q.append("&page=").append(page);
         q.append("&vote_count.gte=").append(tv ? 150 : 300);
@@ -1851,13 +1952,13 @@ public final class CinemaActivity extends Activity {
             q.append("&with_genres=").append(Uri.encode(TextUtils.join(",", with)));
         }
         List<String> without = new ArrayList<>();
-        if (!kids && !"Animație".equals(moodName)) {
+        if (!kids && !"Animation".equals(moodName)) {
             without.add("16");
         }
         if (!kids && !"family".equals(who)) {
             without.add(tv ? "10762" : "10751");
         }
-        if (!"Povești adevărate".equals(moodName)) {
+        if (!"Histoires vraies".equals(moodName)) {
             without.add("99");
         }
         if (kids || "family".equals(who)) {
@@ -1919,11 +2020,28 @@ public final class CinemaActivity extends Activity {
     /** What is popular now on your subscriptions, films and series mixed. */
     private void loadPopular() {
         final int gen = searchGen;
+        if (plex) {
+            net.execute(() -> {
+                final List<Title> list = PlexCinema.popular(this);
+                preloadLogos(list);
+                handler.post(() -> {
+                    if (gen != searchGen) {
+                        return;
+                    }
+                    popular.clear();
+                    popular.addAll(list);
+                    if (tab == 1 && (screen == RESULTS || screen == DETAIL)) {
+                        fillRow();
+                    }
+                });
+            });
+            return;
+        }
         net.execute(() -> {
             List<Title> films = new ArrayList<>();
             List<Title> series = new ArrayList<>();
             try {
-                String common = "language=ro-RO&watch_region=RO&include_adult=false&with_watch_monetization_types=flatrate"
+                String common = "language=fr-FR&watch_region=FR&include_adult=false&with_watch_monetization_types=flatrate"
                         + "&sort_by=popularity.desc&with_watch_providers=" + Uri.encode(TextUtils.join("|", subs));
                 JSONArray m = tmdb.get("/discover/movie", common + "&vote_count.gte=150&without_genres="
                         + Uri.encode("99,10770"), 6 * HOUR).optJSONArray("results");
@@ -2119,7 +2237,8 @@ public final class CinemaActivity extends Activity {
 
     private void fillRow() {
         titles = tab == 1 ? popular : forYou;
-        rowHeading.setText(tab == 1 ? "Populare acum pe abonamentele voastre" : "Pentru voi, în seara asta");
+        rowHeading.setText(tab == 1 ? (plex ? "Reprendre et ajouts récents" : "Populaires sur vos abonnements")
+                : "Pour vous, ce soir");
         row.removeAllViews();
         rowScroll.scrollTo(0, 0);
         focused = -1;
@@ -2370,7 +2489,7 @@ public final class CinemaActivity extends Activity {
         heroTitle.setVisibility(logo != null ? View.GONE : View.VISIBLE);
         heroTitle.setText(t.name);
         List<String> meta = new ArrayList<>();
-        meta.add(t.tv ? "Serial" : "Film");
+        meta.add(t.tv ? "Série" : "Film");
         if (!t.genres.isEmpty()) {
             meta.add(t.genres);
         }
@@ -2391,7 +2510,7 @@ public final class CinemaActivity extends Activity {
         for (Provider p : on) {
             names.add(p.name);
         }
-        String where = names.isEmpty() ? "" : "  ·  Inclus pe " + joinAnd(names);
+        String where = plex ? "  ·  Dans ta bibliothèque" : names.isEmpty() ? "" : "  ·  Inclus sur " + joinAnd(names);
         heroMeta.setText(TextUtils.join("  ·  ", meta) + where);
         Provider main = on.isEmpty() ? null : on.get(0);
         String path = main != null ? providerLogos.get(main.id) : null;
@@ -2407,7 +2526,7 @@ public final class CinemaActivity extends Activity {
         }
         heroOverview.setText(t.overview.isEmpty() ? " " : t.overview);
         if (screen == DETAIL && !t.rent.isEmpty()) {
-            heroRent.setText("Și de închiriat: " + TextUtils.join(", ", t.rent));
+            heroRent.setText("Aussi à louer : " + TextUtils.join(", ", t.rent));
             heroRent.setVisibility(View.VISIBLE);
         } else {
             heroRent.setVisibility(View.GONE);
@@ -2433,7 +2552,7 @@ public final class CinemaActivity extends Activity {
         if (names.size() <= 1) {
             return names.isEmpty() ? "" : names.get(0);
         }
-        return TextUtils.join(", ", names.subList(0, names.size() - 1)) + " și " + names.get(names.size() - 1);
+        return TextUtils.join(", ", names.subList(0, names.size() - 1)) + " et " + names.get(names.size() - 1);
     }
 
     // ------------------------------------------------------------------ the buttons
@@ -2462,7 +2581,7 @@ public final class CinemaActivity extends Activity {
         heroButtons.removeAllViews();
         List<View> buttons = new ArrayList<>();
         final Provider main = on.isEmpty() ? null : on.get(0);
-        buttons.add(capsule(main != null ? "Vezi pe " + main.name : t.detailed ? "Indisponibil acum" : "Se încarcă…", true,
+        buttons.add(capsule(main != null ? "Regarder sur " + main.name : t.detailed ? "Indisponible pour l'instant" : "Chargement…", true,
                 () -> {
                     if (main != null) {
                         watch(t, main);
@@ -2579,7 +2698,7 @@ public final class CinemaActivity extends Activity {
         if (path != null) {
             picture(path, "w92", 92, false, icon::setImageBitmap);
         }
-        b.setContentDescription("Vezi pe " + p.name);
+        b.setContentDescription("Regarder sur " + p.name);
         final Spring lift = springLift(b);
         b.setOnFocusChangeListener((v, has) -> {
             g.setTint(has ? 0xF2FFFFFF : 0x33000000);
@@ -2631,7 +2750,7 @@ public final class CinemaActivity extends Activity {
         net.execute(() -> {
             try {
                 String path = "/" + (t.tv ? "tv" : "movie") + "/" + t.id;
-                JSONObject d = tmdb.get(path, "language=ro-RO&append_to_response="
+                JSONObject d = tmdb.get(path, "language=fr-FR&append_to_response="
                         + Uri.encode("videos,images,watch/providers," + (t.tv ? "content_ratings" : "release_dates"))
                         + "&include_image_language=" + Uri.encode("ro,en,null")
                         + "&include_video_language=" + Uri.encode("ro,en,null"), 24 * HOUR);
@@ -2692,8 +2811,8 @@ public final class CinemaActivity extends Activity {
             if (!"YouTube".equals(site) && !"Vimeo".equals(site)) {
                 continue;
             }
-            int score = ("Trailer".equals(o.optString("type")) ? 4 : "Teaser".equals(o.optString("type")) ? 2 : 0)
-                    + ("ro".equals(o.optString("iso_639_1")) ? 2 : 0) + (o.optBoolean("official") ? 1 : 0);
+            int score = ("Bande-annonce".equals(o.optString("type")) ? 4 : "Teaser".equals(o.optString("type")) ? 2 : 0)
+                    + ("fr".equals(o.optString("iso_639_1")) ? 2 : 0) + (o.optBoolean("official") ? 1 : 0);
             if (score >= 2 && score > best) {
                 best = score;
                 t.trailer = o.optString("key");
@@ -2707,7 +2826,7 @@ public final class CinemaActivity extends Activity {
             for (int i = 0; logos != null && i < logos.length(); i++) {
                 JSONObject o = logos.optJSONObject(i);
                 String lang = o.optString("iso_639_1", "");
-                int r = "ro".equals(lang) ? 3 : "en".equals(lang) ? 2 : 1;
+                int r = "fr".equals(lang) ? 3 : "en".equals(lang) ? 2 : 1;
                 double ratio = o.optDouble("aspect_ratio", 2);
                 if (ratio > 1.2 && ratio < 7 && r > rank && o.optString("file_path", "").endsWith(".png")) {
                     rank = r;
@@ -2729,7 +2848,7 @@ public final class CinemaActivity extends Activity {
         }
         JSONObject providers = d.optJSONObject("watch/providers");
         JSONObject ro = providers != null && providers.optJSONObject("results") != null
-                ? providers.optJSONObject("results").optJSONObject("RO") : null;
+                ? providers.optJSONObject("results").optJSONObject("FR") : null;
         t.included.clear();
         t.rent.clear();
         if (ro != null) {
@@ -2765,7 +2884,7 @@ public final class CinemaActivity extends Activity {
             for (int i = 0; r != null && i < r.length(); i++) {
                 JSONObject o = r.optJSONObject(i);
                 String rating = o.optString("rating", "");
-                if ("RO".equals(o.optString("iso_3166_1")) && !rating.isEmpty()) {
+                if ("FR".equals(o.optString("iso_3166_1")) && !rating.isEmpty()) {
                     return rating;
                 }
                 if ("US".equals(o.optString("iso_3166_1"))) {
@@ -2787,7 +2906,7 @@ public final class CinemaActivity extends Activity {
                     break;
                 }
             }
-            if ("RO".equals(o.optString("iso_3166_1")) && !found.isEmpty()) {
+            if ("FR".equals(o.optString("iso_3166_1")) && !found.isEmpty()) {
                 return found;
             }
             if ("US".equals(o.optString("iso_3166_1"))) {
@@ -2817,10 +2936,12 @@ public final class CinemaActivity extends Activity {
         slideIndex = 0;
         handler.removeCallbacks(slideshow);
         handler.postDelayed(slideshow, 6000);
-        net.execute(() -> {
-            Map<String, String> ids = tmdb.streamingIds(t.tv, t.id);
-            handler.post(() -> t.ids = ids);
-        });
+        if (!plex) {
+            net.execute(() -> {
+                Map<String, String> ids = tmdb.streamingIds(t.tv, t.id);
+                handler.post(() -> t.ids = ids);
+            });
+        }
     }
 
     private int slideIndex;
@@ -3047,6 +3168,13 @@ public final class CinemaActivity extends Activity {
      * first asks for the profile, TV Home sends the title again afterwards.
      */
     static boolean open(android.app.Activity a, Tmdb tmdb, Title t, Provider p) {
+        if (p.id == PlexCinema.PLEX.id && t.ids != null && t.ids.get("plex") != null) {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(t.ids.get("plex"))).setPackage(p.pkg);
+            if (startApp(a, intent)) {
+                SourcesService.titleOpened(a, p.pkg, intent);
+                return true;
+            }
+        }
         Map<String, String> ids = t.ids != null ? t.ids : idsNow(tmdb, t);
         String query = Uri.encode(!t.original.isEmpty() ? t.original : t.name);
         String address = null;
@@ -3200,7 +3328,7 @@ public final class CinemaActivity extends Activity {
         slp.topMargin = px(10);
         group.addView(sub, slp);
         if (retry != null) {
-            TextView again = capsule("Încearcă din nou", false, retry);
+            TextView again = capsule("Réessayer", false, retry);
             LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-2, px(44));
             alp.topMargin = px(26);
             group.addView(again, alp);
@@ -3235,24 +3363,24 @@ public final class CinemaActivity extends Activity {
         CinemaMark.Spin mark = new CinemaMark.Spin(this);
         card.addView(mark, new LinearLayout.LayoutParams(px(40), px(40)));
         TextView head = text(20, true);
-        head.setText("Ieși din Modul Cinema?");
+        head.setText("Quitter le mode Cinéma ?");
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
         hlp.topMargin = px(14);
         card.addView(head, hlp);
         TextView sub = text(13.5f, false);
         sub.setAlpha(0.7f);
-        sub.setText("Revii la ecranul principal.");
+        sub.setText("Retour à l'écran d'accueil.");
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-2, -2);
         slp.topMargin = px(6);
         card.addView(sub, slp);
         LinearLayout choices = new LinearLayout(this);
         choices.setOrientation(LinearLayout.HORIZONTAL);
         choices.setClipChildren(false);
-        TextView leave = capsule("Ieși", false, () -> {
+        TextView leave = capsule("Quitter", false, () -> {
             closeAsk();
             exitCinema();
         });
-        TextView stay = capsule("Rămân", false, this::closeAsk);
+        TextView stay = capsule("Rester", false, this::closeAsk);
         LinearLayout.LayoutParams a = new LinearLayout.LayoutParams(-2, px(44));
         a.rightMargin = px(12);
         choices.addView(leave, a);
@@ -3681,7 +3809,7 @@ public final class CinemaActivity extends Activity {
             return true;
         }
         if (screen == INTRO) {
-            if (down && event.getRepeatCount() == 0 && tmdb.ready()) {
+            if (down && event.getRepeatCount() == 0 && (plex || tmdb.ready())) {
                 handler.removeCallbacksAndMessages(null);
                 if (player != null) {
                     player.setVolume(0.3f, 0.3f);

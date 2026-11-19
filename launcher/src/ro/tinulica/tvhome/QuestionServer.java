@@ -116,7 +116,7 @@ final class QuestionServer {
                 }
             } else {
                 status = 404;
-                body = shell("<p class=muted>Întrebarea nu mai e deschisă.</p>");
+                body = shell("<p class=muted>La question n'est plus ouverte.</p>");
             }
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             OutputStream out = c.getOutputStream();
@@ -142,7 +142,7 @@ final class QuestionServer {
         }
         String answered = chosen != null ? chosen : q.answer;
         if (answered != null) {
-            b.append("<div class=done>✓ ").append(esc(answered)).append("</div><p class=muted>Gata. Poți închide pagina.</p>");
+            b.append("<div class=done>✓ ").append(esc(answered)).append("</div><p class=muted>C'est fait. Tu peux fermer la page.</p>");
         } else {
             for (int i = 0; i < q.options.size(); i++) {
                 b.append("<a class=choice href=\"/a/").append(q.id).append('/').append(i).append("\">")

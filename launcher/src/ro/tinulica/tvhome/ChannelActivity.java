@@ -171,18 +171,18 @@ public final class ChannelActivity extends Activity {
     }
 
     private static final String[][] CATEGORY_WORDS = {
-            {"Sport", "sport", "eurosport", "arena", "golf", "fight", "motorvision", "bein", "extreme", "auto motor"},
-            {"Știri", "news", "stiri", "știri", "antena 3", "realitatea", "b1", "digi24", "digi 24", "euronews",
+            {"Sport", "sport", "equipe", "l'équipe", "rmc sport", "canal+ sport", "infosport", "eurosport", "arena", "golf", "fight", "motorvision", "bein", "extreme", "auto motor"},
+            {"Info", "news", "bfm", "cnews", "lci", "franceinfo", "france info", "france 24", "i24", "lcp", "public sénat", "stiri", "știri", "antena 3", "realitatea", "b1", "digi24", "digi 24", "euronews",
                     "cnn", "tvr info", "romania tv", "românia tv", "money", "bloomberg", "aljazeera", "sky news", "rfi"},
-            {"Copii", "kids", "junior", "cartoon", "nick", "disney", "baby", "minimax", "boomerang", "jim jam",
+            {"Jeunesse", "kids", "gulli", "tiji", "canal j", "piwi", "okoo", "teletoon", "junior", "cartoon", "nick", "disney", "baby", "minimax", "boomerang", "jim jam",
                     "duck", "teen", "cartoonito", "pbs"},
-            {"Filme", "film", "movie", "cinema", "cinemax", "hbo", "axn", "amc", "tcm", "tv1000", "comedy", "epic",
+            {"Films", "film", "ciné", "cine+", "ocs", "rtl9", "tmc", "w9", "nrj 12", "6ter", "movie", "cinema", "cinemax", "hbo", "axn", "amc", "tcm", "tv1000", "comedy", "epic",
                     "diva", "warner", "universal", "paramount", "filmbox", "cinestar", "pro cinema", "happy", "stars",
                     "acasa gold", "acasă gold", "bollywood", "sundance", "kino", "series", "seriale"},
-            {"Documentare", "discovery", "national geographic", "nat geo", "history", "viasat", "animal", "planet",
+            {"Documentaires", "discovery", "rmc découverte", "rmc story", "ushuaïa", "histoire", "planète", "arte", "science & vie", "national geographic", "nat geo", "history", "viasat", "animal", "planet",
                     "travel", "food", "explorer", "earth", "science", "investigation", "crime", "docu", "da vinci",
                     "fishing", "hunting", "outdoor", "museum", "nature", "spektrum", "ci ", "tlc", "hgtv"},
-            {"Muzică", "music", "muzic", "mtv", "vh1", "hit", "kiss", "taraf", "favorit", "etno", "dance", "radio",
+            {"Musique", "music", "mcm", "m6 music", "cstar", "nrj hits", "melody", "muzic", "mtv", "vh1", "hit", "kiss", "taraf", "favorit", "etno", "dance", "radio",
                     "trace", "mezzo", "clubbing"},
     };
 
@@ -196,7 +196,7 @@ public final class ChannelActivity extends Activity {
                 }
             }
         }
-        return "Generale";
+        return "Généralistes";
     }
 
     private final java.util.concurrent.ExecutorService guideWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -324,19 +324,19 @@ public final class ChannelActivity extends Activity {
             @Override
             public void onVideoUnavailable(String inputId, int reason) {
                 if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING) {
-                    showWaiting(true, t("Se schimbă canalul…", "Tuning…"), null);
+                    showWaiting(true, "Changement de chaîne…", null);
                 } else if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_WEAK_SIGNAL) {
-                    showWaiting(true, t("Semnal slab", "Weak signal"), t("Verifică antena sau cablul.", "Check the antenna or cable."));
+                    showWaiting(true, "Signal faible", "Vérifie l'antenne ou le câble.");
                 } else if (reason == TvInputManager.VIDEO_UNAVAILABLE_REASON_AUDIO_ONLY) {
-                    showWaiting(true, t("Canal radio", "Radio channel"), null);
+                    showWaiting(true, "Station de radio", null);
                 } else {
-                    showWaiting(true, t("Fără semnal", "No signal"), t("Verifică antena sau cablul.", "Check the antenna or cable."));
+                    showWaiting(true, "Pas de signal", "Vérifie l'antenne ou le câble.");
                 }
             }
 
             @Override
             public void onContentBlocked(String inputId, android.media.tv.TvContentRating rating) {
-                showWaiting(true, t("Conținut blocat", "Content blocked"), t("Restricțiile parentale ale televizorului.", "The TV's parental controls."));
+                showWaiting(true, "Contenu bloqué", "Le contrôle parental de la TV.");
             }
 
             @Override
@@ -432,8 +432,8 @@ public final class ChannelActivity extends Activity {
             // A locked channel is not tuned at all until its PIN is entered.
             tv.reset();
             lockShown = true;
-            showWaiting(true, t("Canal blocat", "Channel locked"),
-                    t("Apasă OK și introdu codul PIN.", "Press OK and enter the PIN."));
+            showWaiting(true, "Chaîne verrouillée",
+                    "Appuie sur OK et saisis le code PIN.");
             return;
         }
         if (lockShown) {
@@ -581,7 +581,7 @@ public final class ChannelActivity extends Activity {
         banner.addView(bannerNext, nlp);
         holdHint = text(12.5f, true);
         holdHint.setGravity(Gravity.CENTER);
-        holdHint.setText(t("Dă drumul pentru opțiuni", "Let go for options"));
+        holdHint.setText("Relâche pour les options");
         holdHint.setVisibility(View.GONE);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-1, -2);
         hlp.topMargin = px(8);
@@ -631,7 +631,7 @@ public final class ChannelActivity extends Activity {
                 bannerProgress.setLayoutParams(lp);
             });
             if (guide.size() > 1) {
-                bannerNext.setText(t("Urmează", "Next") + " " + hm.format(new Date(guide.get(1).start))
+                bannerNext.setText("Ensuite" + " " + hm.format(new Date(guide.get(1).start))
                         + "  ·  " + guide.get(1).title);
                 bannerNext.setVisibility(View.VISIBLE);
             } else {
@@ -665,7 +665,7 @@ public final class ChannelActivity extends Activity {
         head.setGravity(Gravity.CENTER_VERTICAL);
         head.setPadding(px(8), 0, px(4), px(10));
         TextView title = text(17, true);
-        title.setText(t("Canale", "Channels"));
+        title.setText("Chaînes");
         head.addView(title, new LinearLayout.LayoutParams(0, -2, 1f));
         categoryView = text(12, true);
         categoryView.setGravity(Gravity.CENTER);
@@ -779,9 +779,9 @@ public final class ChannelActivity extends Activity {
     private void showList() {
         categories.clear();
         if (!favourites.isEmpty()) {
-            categories.add(t("Favorite", "Favourites"));
+            categories.add("Favoris");
         }
-        categories.add(t("Toate", "All"));
+        categories.add("Toutes");
         for (String[] group : CATEGORY_WORDS) {
             for (Channel ch : channels) {
                 if (group[0].equals(ch.category)) {
@@ -790,8 +790,8 @@ public final class ChannelActivity extends Activity {
                 }
             }
         }
-        categories.add("Generale");
-        category = categories.indexOf(t("Toate", "All"));
+        categories.add("Généralistes");
+        category = categories.indexOf("Toutes");
         listStart = current;
         list.setVisibility(View.VISIBLE);
         fillRows(true);
@@ -809,10 +809,10 @@ public final class ChannelActivity extends Activity {
 
     private boolean inCategory(Channel ch) {
         String name = categories.get(category);
-        if (name.equals(t("Toate", "All"))) {
+        if (name.equals("Toutes")) {
             return true;
         }
-        if (name.equals(t("Favorite", "Favourites"))) {
+        if (name.equals("Favoris")) {
             return favourites.contains(ch.id);
         }
         return name.equals(ch.category);
@@ -842,8 +842,7 @@ public final class ChannelActivity extends Activity {
             none.setAlpha(0.6f);
             none.setPadding(px(10), px(12), px(10), px(12));
             none.setSingleLine(false);
-            none.setText(t("Niciun canal aici. Ține apăsat OK pe un canal ca să-l adaugi la Favorite.",
-                    "No channels here. Hold OK on a channel to add it to Favourites."));
+            none.setText("Aucune chaîne ici. Maintiens OK sur une chaîne pour l'ajouter aux Favoris.");
             listRows.addView(none);
             listRows.setFocusable(true);
             listRows.requestFocus();
@@ -1124,7 +1123,7 @@ public final class ChannelActivity extends Activity {
                     commitDigits.run();
                 } else if (lockShown && current >= 0) {
                     final Channel ch = channels.get(current);
-                    askPin(t("Introdu codul PIN", "Enter the PIN"), pin -> {
+                    askPin("Saisis le code PIN", pin -> {
                         if (pinMatches(pin)) {
                             unlocked.add(ch.id);
                             closeModal();
@@ -1422,15 +1421,15 @@ public final class ChannelActivity extends Activity {
         card.addView(title);
         TextView sub = text(12, false);
         sub.setAlpha(0.65f);
-        sub.setText(locked.contains(ch.id) ? t("Canal blocat cu PIN", "Locked with a PIN")
-                : t("Blochează-l ca să ceară codul PIN.", "Lock it to ask for the PIN."));
+        sub.setText(locked.contains(ch.id) ? "Verrouillée par code PIN"
+                : "Verrouille-la pour demander le code PIN.");
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-2, -2);
         slp.topMargin = px(4);
         slp.bottomMargin = px(14);
         card.addView(sub, slp);
         final boolean hasPin = prefs.getString(KEY_PIN, null) != null;
         if (!locked.contains(ch.id)) {
-            addButton(card, buttons, actions, t("Blochează canalul", "Lock channel"), () -> {
+            addButton(card, buttons, actions, "Verrouiller la chaîne", () -> {
                 Runnable lock = () -> {
                     locked.add(ch.id);
                     unlocked.remove(ch.id);
@@ -1446,8 +1445,8 @@ public final class ChannelActivity extends Activity {
                 }
             });
         } else {
-            addButton(card, buttons, actions, t("Deblochează canalul", "Unlock channel"), () ->
-                    askPin(t("Introdu codul PIN", "Enter the PIN"), pin -> {
+            addButton(card, buttons, actions, "Déverrouiller la chaîne", () ->
+                    askPin("Saisis le code PIN", pin -> {
                         if (pinMatches(pin)) {
                             locked.remove(ch.id);
                             saveLocks();
@@ -1460,8 +1459,8 @@ public final class ChannelActivity extends Activity {
                     }));
         }
         if (hasPin) {
-            addButton(card, buttons, actions, t("Schimbă codul PIN", "Change PIN"), () ->
-                    askPin(t("Codul PIN actual", "Current PIN"), pin -> {
+            addButton(card, buttons, actions, "Changer le code PIN", () ->
+                    askPin("Code PIN actuel", pin -> {
                         if (pinMatches(pin)) {
                             createPin(this::closeModal);
                         } else {
@@ -1469,7 +1468,7 @@ public final class ChannelActivity extends Activity {
                         }
                     }));
         }
-        addButton(card, buttons, actions, t("Anulează", "Cancel"), this::closeModal);
+        addButton(card, buttons, actions, "Annuler", this::closeModal);
         highlight(buttons, 0);
     }
 
@@ -1500,8 +1499,8 @@ public final class ChannelActivity extends Activity {
 
     /** A new PIN, typed twice. */
     private void createPin(final Runnable then) {
-        askPin(t("Alege un cod PIN din 4 cifre", "Choose a 4-digit PIN"), first ->
-                askPin(t("Confirmă codul PIN", "Confirm the PIN"), second -> {
+        askPin("Choisis un code PIN à 4 chiffres", first ->
+                askPin("Confirme le code PIN", second -> {
                     if (first.equals(second)) {
                         prefs.edit().putString(KEY_PIN, hash(first)).apply();
                         then.run();
@@ -1583,7 +1582,7 @@ public final class ChannelActivity extends Activity {
         card.addView(row, rlp);
         TextView hint = text(11, false);
         hint.setAlpha(0.55f);
-        hint.setText(t("Cifrele telecomenzii, sau Sus/Jos și OK", "Digit keys, or Up/Down and OK"));
+        hint.setText("Chiffres de la télécommande, ou Haut/Bas et OK");
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-2, -2);
         hlp.topMargin = px(12);
         card.addView(hint, hlp);
@@ -1677,7 +1676,7 @@ public final class ChannelActivity extends Activity {
             } else if ("lock".equals(what)) {
                 openLockMenu();
             } else if ("pin".equals(what)) {
-                askPin(t("Alege un cod PIN din 4 cifre", "Choose a 4-digit PIN"), pin -> closeModal());
+                askPin("Choisis un code PIN à 4 chiffres", pin -> closeModal());
             }
             handler.postDelayed(() -> {
                 android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(root.getWidth(), root.getHeight(),

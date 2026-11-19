@@ -175,20 +175,20 @@ final class Connectivity {
         input.setSingleLine(true);
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        input.setHint("Parola");
+        input.setHint("Mot de passe");
         new android.app.AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(network.ssid)
                 .setView(input)
-                .setPositiveButton("Conectează", (dialog, which) ->
+                .setPositiveButton("Se connecter", (dialog, which) ->
                         report(activity, network, connect(activity, network, input.getText().toString()), done))
-                .setNegativeButton("Renunță", null)
+                .setNegativeButton("Annuler", null)
                 .show();
         input.requestFocus();
     }
 
     private static void report(android.app.Activity activity, Network network, boolean ok, Runnable done) {
-        SourcesService.say(activity, ok ? "Se conectează la " + network.ssid + "…"
-                : "Nu m-am putut conecta la " + network.ssid);
+        SourcesService.say(activity, ok ? "Connexion à " + network.ssid + "…"
+                : "Impossible de se connecter à " + network.ssid);
         if (done != null) {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(done, 4000);
         }
@@ -272,16 +272,16 @@ final class Connectivity {
                 case BluetoothClass.Device.Major.AUDIO_VIDEO:
                     return "Audio";
                 case BluetoothClass.Device.Major.PERIPHERAL:
-                    return "Telecomandă sau tastatură";
+                    return "Télécommande ou clavier";
                 case BluetoothClass.Device.Major.PHONE:
                     return "Telefon";
                 case BluetoothClass.Device.Major.COMPUTER:
-                    return "Computer";
+                    return "Ordinateur";
                 default:
-                    return "Dispozitiv";
+                    return "Appareil";
             }
         } catch (RuntimeException e) {
-            return "Dispozitiv";
+            return "Appareil";
         }
     }
 

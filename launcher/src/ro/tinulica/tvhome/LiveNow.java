@@ -78,7 +78,7 @@ final class LiveNow {
         if (last >= 0) {
             order.add(last);
         }
-        for (String cat : new String[]{"Știri", "Sport", "Filme", "Documentare", "Copii", "Muzică"}) {
+        for (String cat : new String[]{"Info", "Sport", "Films", "Documentaires", "Jeunesse", "Musique"}) {
             int taken = 0;
             for (ChannelActivity.Channel ch : all) {
                 if (cat.equals(ch.category) && taken < 2) {
@@ -143,12 +143,12 @@ final class LiveNow {
 
     private static int colourOf(String category) {
         switch (category) {
-            case "Știri": return 0xFF2C6BED;
+            case "Info": return 0xFF2C6BED;
             case "Sport": return 0xFF1FA463;
-            case "Filme": return 0xFFB8334A;
-            case "Copii": return 0xFFF29A2E;
-            case "Muzică": return 0xFF9B4DE0;
-            case "Documentare": return 0xFF2E9C9C;
+            case "Films": return 0xFFB8334A;
+            case "Jeunesse": return 0xFFF29A2E;
+            case "Musique": return 0xFF9B4DE0;
+            case "Documentaires": return 0xFF2E9C9C;
             default: return 0xFF4A5568;
         }
     }

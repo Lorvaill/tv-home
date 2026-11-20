@@ -6,7 +6,7 @@ streaming, un Mod Cinema care te ajută să alegi un film, notificări cu vremea
 mesaje și întrebări de pe calculator (făcute pentru un asistent AI care lucrează cât te uiți la
 televizor), plus un instrument care curăță televizorul.
 
-[English](README.md)
+[English](README.en.md) · [Français](README.md)
 
 ![Ecranul principal](docs/images/home.jpg)
 

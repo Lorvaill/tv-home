@@ -633,7 +633,9 @@ public class MainActivity extends Activity {
         }
         long interval = prefs.getInt(KEY_INTERVAL, 300) * 1000L;
         long shownFor = SystemClock.elapsedRealtime() - wallpaperShownAt;
-        if (wallpaperIndex < 0 || shownFor >= interval) {
+        // The sky changed while an app was open: the wallpaper that suits it now, straight away.
+        boolean outdated = videoSource != null && !wallpapers.isEmpty() && !wallpapers.contains(videoSource);
+        if (wallpaperIndex < 0 || shownFor >= interval || outdated) {
             showNextWallpaper();
         } else {
             handler.postDelayed(wallpaperTick, interval - shownFor);
@@ -875,7 +877,7 @@ public class MainActivity extends Activity {
         plp.leftMargin = px(10);
         pills.addView(inputsPill, plp);
         // While Cinema stays open behind a film's app, this takes you back to it.
-        cinemaReturn = pill("Cinema");
+        cinemaReturn = pill("Cinéma");
         cinemaReturn.setPadding(px(10), 0, px(14), 0);
         cinemaReturn.setCompoundDrawablePadding(px(6));
         cinemaReturn.setCompoundDrawablesWithIntrinsicBounds(
@@ -3273,7 +3275,7 @@ public class MainActivity extends Activity {
             rows.add(pairRow(accounts, store));
         } else {
             // The big module: Cinema (the screensaver stays available among the shortcuts).
-            View big = bigTile("Cinema", null,
+            View big = bigTile("Cinéma", null,
                     new android.graphics.drawable.BitmapDrawable(getResources(), CinemaMark.bitmap(px(52) * 2)),
                     this::enterCinema);
             String wifi = wifiName();
@@ -8471,6 +8473,11 @@ public class MainActivity extends Activity {
             }
         }
         Bitmap frame = videoFrame(source, screenW, screenH);
+        if (frame == null) {
+            // This TV cannot take a frame out of 4K HEVC: use the still made on the computer
+            // (dynamic/stills/<name>.jpg), or the glass would keep showing the old wallpaper.
+            frame = stillOf(this, source);
+        }
         if (frame != null) {
             dir.mkdirs();
             try (java.io.FileOutputStream out = new java.io.FileOutputStream(poster)) {
@@ -8480,6 +8487,15 @@ public class MainActivity extends Activity {
             }
         }
         return frame;
+    }
+
+    /** The still made on the computer for a video wallpaper (sync-fonds), or null. */
+    static Bitmap stillOf(Context context, String source) {
+        File video = new File(source);
+        String name = video.getName();
+        int dot = name.lastIndexOf('.');
+        File still = new File(new File(video.getParentFile(), "stills"), (dot > 0 ? name.substring(0, dot) : name) + ".jpg");
+        return still.exists() ? BitmapFactory.decodeFile(still.getAbsolutePath()) : null;
     }
 
     /** The first frame of a video, at about the screen's size. */

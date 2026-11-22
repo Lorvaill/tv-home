@@ -7,7 +7,9 @@
   <a href="README.en.md">English (original)</a> · <a href="README.ro.md">Română</a>
 </p>
 
-<!-- SCREEN:hero -->
+<p align="center">
+  <img src="docs/images/fr/accueil.jpg" alt="L'écran d'accueil" width="100%">
+</p>
 
 > [!NOTE]
 > Ce dépôt est un fork de [**tinulica/tv-home**](https://github.com/tinulica/tv-home). Tout le mérite du
@@ -29,7 +31,26 @@
 | 🎮 **Pas de mise en veille en jeu** | Tant qu'une source HDMI (console, box) ou l'antenne est à l'écran, la télé ne lance plus l'écran de veille et ne s'éteint plus pour inactivité. |
 | ⚙️ **Réglages TCL par-dessus les applis** | La touche engrenage ouvre le panneau rapide comme un overlay, au lieu de quitter l'appli ou la source en cours. |
 
-<!-- SCREEN:gallery -->
+### 📸 En images
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/fr/plex.jpg" alt="Les tuiles Plex"></td>
+    <td width="50%"><img src="docs/images/fr/micro.jpg" alt="La bulle du micro"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>🎬 Plex sur l'accueil</b><br><sub>Films et séries de ta bibliothèque, façon Apple TV</sub></td>
+    <td align="center"><b>🎙️ Le micro</b><br><sub>Une bulle d'écoute par-dessus n'importe quelle appli</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/fr/cinema-questions.jpg" alt="Les questions du mode Cinéma"></td>
+    <td width="50%"><img src="docs/images/fr/cinema-plex.jpg" alt="Les propositions du mode Cinéma"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>🍿 Mode Cinéma</b><br><sub>Quelques questions : pour qui, quoi, quelle humeur…</sub></td>
+    <td align="center"><b>🍿 … et ce qu'il te propose</b><br><sub>Tiré de ta bibliothèque Plex, lancé en un clic</sub></td>
+  </tr>
+</table>
 
 ---
 

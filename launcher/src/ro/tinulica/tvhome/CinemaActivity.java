@@ -1785,7 +1785,11 @@ public final class CinemaActivity extends Activity {
         if (dir == null) {
             return;
         }
-        try (java.io.FileWriter w = new java.io.FileWriter(new java.io.File(dir, "cinema.log"), true)) {
+        java.io.File file = new java.io.File(dir, "cinema.log");
+        if (file.length() > 256 * 1024 && !file.delete()) {
+            return;   // kept small
+        }
+        try (java.io.FileWriter w = new java.io.FileWriter(file, true)) {
             w.write(new java.util.Date() + "  " + line + "\n");
         } catch (IOException ignored) {
             // Debug only.

@@ -106,6 +106,16 @@ final class Previews {
         if (logFile == null) {
             return;
         }
+        if (logFile.length() > 512 * 1024) {
+            // Kept small: the previous half-megabyte moves aside, the older one goes.
+            java.io.File old = new java.io.File(logFile.getPath() + ".1");
+            if (!old.delete() && old.exists()) {
+                return;
+            }
+            if (!logFile.renameTo(old)) {
+                return;
+            }
+        }
         try (FileWriter out = new FileWriter(logFile, true)) {
             out.write(new java.util.Date() + "  " + line + System.lineSeparator());
         } catch (IOException ignored) {

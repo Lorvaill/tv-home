@@ -3133,8 +3133,6 @@ public class MainActivity extends Activity {
      * and a row of round icon buttons at the end.
      */
     private void showControl(boolean inputsFirst) {
-        previews.note("showControl(" + inputsFirst + ") from "
-                + android.util.Log.getStackTraceString(new Throwable()).replace('\n', ' '));
         controlList.removeAllViews();
         tabButtons.clear();
         controlTab = inputsFirst ? TAB_SOURCES : TAB_TV;
@@ -6256,11 +6254,6 @@ public class MainActivity extends Activity {
                     break;
             }
         }
-        if (event.getDeviceId() != -1) {
-            previews.note("remote key " + KeyEvent.keyCodeToString(keyCode)
-                    + (event.getAction() == KeyEvent.ACTION_DOWN ? " down" : " up") + " rep=" + event.getRepeatCount()
-                    + " t=" + event.getEventTime() + " dev=" + event.getDeviceId());
-        }
 
         // One press = one step. This remote can deliver a press twice (Bluetooth and infrared, or
         // a bounce) and repeats a held key very fast: duplicates within 90 ms of a release are
@@ -6772,7 +6765,6 @@ public class MainActivity extends Activity {
             return;
         }
         browsing = false;
-        previews.note("exitBrowse from " + android.util.Log.getStackTraceString(new Throwable()).replace(System.lineSeparator(), " "));
         for (View v : new View[]{tray, dockHolder, gridScroll}) {
             float rest = v == gridScroll ? gridClosedOffset : 0;
             v.animate().alpha(1f).translationY(rest).setInterpolator(EASE).setDuration(360).start();
@@ -7616,7 +7608,6 @@ public class MainActivity extends Activity {
         editing = tile;
         motion(tile).stopAll();
         addRemoveBadge(tile);
-        previews.note("startEdit from " + android.util.Log.getStackTraceString(new Throwable()).replace('\n', ' '));
         stopSway();
         tile.animate().cancel();
         tile.animate().scaleX(1.18f).scaleY(1.18f).translationZ(px(28)).rotationX(0).rotationY(0)

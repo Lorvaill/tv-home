@@ -380,7 +380,11 @@ public final class ChannelActivity extends Activity {
         if (dir == null) {
             return;
         }
-        try (java.io.FileWriter w = new java.io.FileWriter(new java.io.File(dir, "channels.log"), true)) {
+        java.io.File file = new java.io.File(dir, "channels.log");
+        if (file.length() > 256 * 1024 && !file.delete()) {
+            return;   // kept small
+        }
+        try (java.io.FileWriter w = new java.io.FileWriter(file, true)) {
             w.write(new Date() + "  +" + (android.os.SystemClock.uptimeMillis() - born) + " ms  " + what + "\n");
         } catch (java.io.IOException ignored) {
             // Debug only.

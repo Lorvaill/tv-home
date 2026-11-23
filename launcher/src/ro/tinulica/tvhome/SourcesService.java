@@ -1883,7 +1883,9 @@ public final class SourcesService extends AccessibilityService {
         filter.addAction("ro.tinulica.tvhome.TEST_SESSION");
         filter.addAction("ro.tinulica.tvhome.TEST_CLOSE");
         filter.addAction("ro.tinulica.tvhome.TEST_SWITCHER");
-        registerReceiver(tests, filter);
+        // Test and dump broadcasts (adb only): the sender must hold DUMP, which the shell has and
+        // apps do not. Without it, any app could have shown fake notices or pressed Back.
+        registerReceiver(tests, filter, android.Manifest.permission.DUMP, null);
     }
 
     /**

@@ -533,10 +533,9 @@ public class MainActivity extends Activity {
         }
         // Trying wallpapers from the computer (adb only): "--es wallpaper_test <file>" shows that
         // file now, "--es wallpaper_test off" goes back to the one that suits the sky.
-        // Testing the room's lights from the computer: "--es ha_test on" / "off".
         // Cinema from the computer, without the lights: "--es cinema_test 1".
         // The remote's microphone (VoiceActivity): "cinema", or "search" with what was said.
-        final String voice = intent.getStringExtra("voice");
+        final String voice = INTERNAL.equals(intent.getStringExtra("internal")) ? intent.getStringExtra("voice") : null;
         if (voice != null) {
             final String said = intent.getStringExtra("voice_query");
             handler.postDelayed(() -> voice(voice, said), 150);
@@ -547,14 +546,8 @@ public class MainActivity extends Activity {
                     .putExtra(CinemaActivity.EXTRA_NAME, profileFirstName()));
             return;
         }
-        final String haTest = intent.getStringExtra("ha_test");
-        if (haTest != null) {
-            applyConfig(intent);
-            HomeAssistant.cinema(this, "on".equals(haTest));
-            return;
-        }
         final String test = intent.getStringExtra("wallpaper_test");
-        if (test != null) {
+        if (test != null && ("off".equals(test) || insideOwnFiles(test))) {
             wallpaperTest = "off".equals(test) ? null : test;
             dynamicPick = null;
             loadWallpaperList();
@@ -582,6 +575,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (importSetup()) {
+            rebuildTiles();   // Plex just set up: its cards
+        }
         usageTick.run();
         current = this;
         volumeSink = code -> handler.post(() -> onVolumeKey(code));
@@ -728,18 +724,69 @@ public class MainActivity extends Activity {
     }
 
     /** Reads optional adb extras. Returns true when the dock changed. */
+    /** What setup.conf may set (key=value lines); never accepted from an intent. */
+    static final String[] SECRET_KEYS = {"ha_url", "ha_token", "ha_entities", "plex_url", "plex_token",
+            "croko_url", "croko_user", "croko_pass"};
+
+    /**
+     * Reads files/setup.conf once (then deletes it): Android keeps other apps out of this folder,
+     * so only adb on the computer can put it there.
+     */
+    private boolean importSetup() {
+        File dir = getExternalFilesDir(null);
+        File f = dir != null ? new File(dir, "setup.conf") : null;
+        if (f == null || !f.isFile()) {
+            return false;
+        }
+        boolean changed = false;
+        try {
+            SharedPreferences.Editor e = prefs.edit();
+            for (String line : new String(java.nio.file.Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8)
+                    .split("\r?\n")) {
+                int eq = line.indexOf('=');
+                if (eq <= 0) {
+                    continue;
+                }
+                String key = line.substring(0, eq).trim();
+                String value = line.substring(eq + 1).trim();
+                if (java.util.Arrays.asList(SECRET_KEYS).contains(key)) {
+                    e.putString(key, value);
+                    changed = true;
+                }
+            }
+            e.apply();
+        } catch (java.io.IOException ignored) {
+            // Tried again next time.
+        } finally {
+            if (!f.delete()) {
+                android.util.Log.w("TVHome", "config: setup.conf could not be deleted");
+            }
+        }
+        if (changed) {
+            android.util.Log.i("TVHome", "config: setup.conf imported");
+        }
+        return changed;
+    }
+
+    /** Proof that an intent comes from TV Home itself (VoiceActivity): known only inside this process. */
+    static final String INTERNAL = java.util.UUID.randomUUID().toString();
+
     private boolean applyConfig(Intent intent) {
         if (intent == null) {
             return false;
         }
         SharedPreferences.Editor edit = prefs.edit();
         boolean changed = false;
-        // Home Assistant for Cinema mode's lights (see HomeAssistant).
-        for (String key : new String[]{"ha_url", "ha_token", "ha_entities", "plex_url", "plex_token"}) {
-            String value = intent.getStringExtra(key);
-            if (value != null) {
-                edit.putString(key, value.trim());
+        // Addresses and tokens (Plex, Home Assistant...) are never taken from an intent: any app
+        // on the TV can start this screen with extras, and could point the token at its own
+        // server. They come from files/setup.conf, which only adb (and TV Home) can write.
+        for (String key : SECRET_KEYS) {
+            if (intent.hasExtra(key)) {
+                android.util.Log.w("TVHome", "config: " + key + " ignored in an intent; use files/setup.conf");
             }
+        }
+        if (importSetup()) {
+            changed = true;
         }
         String dockExtra = intent.getStringExtra(KEY_DOCK);
         if (dockExtra != null) {
@@ -7122,10 +7169,47 @@ public class MainActivity extends Activity {
         heroVideo.animate().alpha(0f).setDuration(200).start();
     }
 
+    /**
+     * An intent written by another app (a preview card's link): it may open that app, but not
+     * one of TV Home's own screens (they are not meant to be opened from outside), and it gets no
+     * access to files.
+     */
+    private boolean safeOutside(Intent intent) {
+        intent.setSelector(null);
+        intent.setFlags(intent.getFlags() & ~(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION));
+        intent.setClipData(null);
+        String own = getPackageName();
+        if (intent.getComponent() != null && own.equals(intent.getComponent().getPackageName())) {
+            return false;
+        }
+        if (own.equals(intent.getPackage())) {
+            return false;
+        }
+        if (intent.getComponent() == null && intent.getPackage() == null) {
+            android.content.pm.ResolveInfo r = getPackageManager().resolveActivity(intent, 0);
+            if (r != null && r.activityInfo != null && own.equals(r.activityInfo.packageName)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A wallpaper test file: only one inside TV Home's own folder. */
+    private boolean insideOwnFiles(String path) {
+        try {
+            File dir = getExternalFilesDir(null);
+            return dir != null && new File(path).getCanonicalPath().startsWith(dir.getCanonicalPath() + File.separator);
+        } catch (java.io.IOException e) {
+            return false;
+        }
+    }
+
     private void openPreview(Previews.Item item) {
         try {
             Intent intent = Intent.parseUri(item.intentUri, Intent.URI_INTENT_SCHEME);
-            if (launch(intent, item.title)) {
+            if (safeOutside(intent) && launch(intent, item.title)) {
                 return;
             }
         } catch (RuntimeException | java.net.URISyntaxException ignored) {

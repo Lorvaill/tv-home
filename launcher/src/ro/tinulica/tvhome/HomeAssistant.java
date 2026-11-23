@@ -30,8 +30,12 @@ final class HomeAssistant {
 
     static boolean configured(Context context) {
         SharedPreferences p = prefs(context);
-        return !p.getString("ha_url", "").isEmpty() && !p.getString("ha_token", "").isEmpty()
-                && !p.getString("ha_entities", "").isEmpty();
+        String url = p.getString("ha_url", "").trim();
+        if (!url.isEmpty() && !url.startsWith("http")) {
+            url = "http://" + url;
+        }
+        return !url.isEmpty() && !p.getString("ha_token", "").isEmpty()
+                && !p.getString("ha_entities", "").isEmpty() && LocalNet.safeForSecrets(url);
     }
 
     /** Lights off (true) or back as they were (false); off the main thread, best effort. */

@@ -80,14 +80,14 @@
         </activity>
         <activity
             android:name=".SettingsActivity"
-            android:exported="true"
+            android:exported="false"
             android:taskAffinity="ro.tinulica.tvhome.settings"
             android:excludeFromRecents="true"
             android:theme="@style/Home"
             android:screenOrientation="landscape" />
         <activity
             android:name=".GlassBench"
-            android:exported="true"
+            android:exported="false"
             android:theme="@style/Home"
             android:taskAffinity="ro.tinulica.tvhome.bench"
             android:excludeFromRecents="true"

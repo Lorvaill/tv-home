@@ -354,7 +354,8 @@ public final class VoiceActivity extends Activity {
     }
 
     private void home(String what, String query) {
-        Intent i = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent i = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("internal", MainActivity.INTERNAL);
         if (what != null) {
             i.putExtra("voice", what);
         }

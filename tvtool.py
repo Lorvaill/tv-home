@@ -19,6 +19,7 @@ import argparse
 import concurrent.futures
 import datetime as dt
 import json
+import shlex
 import os
 import random
 import re
@@ -447,7 +448,7 @@ def cmd_launcher(args):
 
     say("2/5 Configurez dock-ul ...")
     dock = choose_dock(device)
-    device.shell("am start -n %s --es dock '%s'" % (HOME_ACTIVITY, ",".join(dock)))
+    device.shell("am start -n %s --es dock %s" % (HOME_ACTIVITY, shlex.quote(",".join(dock))))
     time.sleep(3)
     say("  Dock: %s" % ", ".join(dock))
     screenshot(device, "tv-home-pornit")
@@ -546,7 +547,7 @@ def cmd_surse(args):
         device.shell("pm revoke %s android.permission.WRITE_SECURE_SETTINGS" % HOME_PKG)
         current = device.shell("settings get secure enabled_accessibility_services").strip()
         kept = [s for s in current.split(":") if s and s != "null" and s != SOURCES_SERVICE]
-        device.shell("settings put secure enabled_accessibility_services '%s'" % ":".join(kept))
+        device.shell("settings put secure enabled_accessibility_services %s" % shlex.quote(":".join(kept)))
         say("Serviciul TV Home Surse este oprit și nu mai pornește singur.")
         return
     out = device.shell("pm grant %s android.permission.WRITE_SECURE_SETTINGS" % HOME_PKG).strip()
@@ -580,7 +581,7 @@ def cmd_profile(args):
     and/or gives the profile in use a name (--name)."""
     device = open_device(args.ip, args.backend)
     if args.name:
-        device.shell("am start -n %s --es profile_name '%s'" % (HOME_ACTIVITY, args.name.replace("'", "")))
+        device.shell("am start -n %s --es profile_name %s" % (HOME_ACTIVITY, shlex.quote(args.name)))
         say("Profilul se numește acum „%s”." % args.name)
         if not args.image:
             return
@@ -644,12 +645,12 @@ def cmd_folder(args):
     """Groups apps into a folder on the grid (or removes the folder)."""
     device = open_device(args.ip, args.backend)
     if args.remove:
-        device.shell("am start -n %s --es folder_remove '%s'" % (HOME_ACTIVITY, args.name))
+        device.shell("am start -n %s --es folder_remove %s" % (HOME_ACTIVITY, shlex.quote(args.name)))
         say("Folderul „%s” a fost desfăcut." % args.name)
     else:
         if not args.packages:
             sys.exit("Dați pachetele separate prin virgulă, sau --remove.")
-        device.shell("am start -n %s --es folder_set '%s=%s'" % (HOME_ACTIVITY, args.name, args.packages))
+        device.shell("am start -n %s --es folder_set %s" % (HOME_ACTIVITY, shlex.quote("%s=%s" % (args.name, args.packages))))
         say("Folder „%s”: %s" % (args.name, args.packages))
     time.sleep(3)
     screenshot(device, "folder")

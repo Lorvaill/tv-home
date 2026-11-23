@@ -69,23 +69,39 @@
 1. **Créer un jeton dans HA** : **Profil** (nom en bas à gauche) → **Sécurité** → **Jetons d'accès longue durée** (section en bas) → **Créer un jeton**.
    > ⚠️ Il ne s'affiche qu'une fois : copiez-le tout de suite.
 2. **Trouver les lumières** que vous voulez connecter au mode Cinéma : **Aperçu** (tableau de bord) → cliquer sur un appareil → **⚙️ Engrenage** → case **« ID de l'entité »**, par exemple `switch.prise`.
-3. **Envoyer les infos sur la TV** avec la commande ci-dessous, depuis un terminal (cmd) avec `adb` :
+3. **Envoyer les infos sur la TV** : écrire un fichier `setup.conf` puis le copier sur la télé, depuis un terminal (cmd) avec `adb` :
+
+```text
+ha_url=http://192.168.1.10:8123
+ha_token=<jeton>
+ha_entities=light.salon,switch.prise
+```
 
 ```sh
-adb shell am start -n ro.tinulica.tvhome/.MainActivity \
-    --es ha_url http://ip-de-ha --es ha_token <jeton> \
-    --es ha_entities light.salon,switch.prise
+adb push setup.conf /sdcard/Android/data/ro.tinulica.tvhome/files/setup.conf
 ```
 
 ### 🎬 Plex et le mode Cinéma
 
 1. **Obtenir le jeton** : cliquer sur n'importe quel film → **Obtenir des infos** → **Afficher le XML**. Dans l'URL de la page qui s'ouvre, tout à la fin : `X-Plex-Token=` suivi d'une vingtaine de caractères.
-2. **L'envoyer sur la TV** avec l'adresse du serveur :
+2. **L'envoyer sur la TV** avec l'adresse du serveur, dans un fichier `setup.conf` copié comme pour Home Assistant (les deux peuvent être dans le même fichier) :
+
+```text
+plex_url=192.168.1.10:32400
+plex_token=<jeton>
+```
 
 ```sh
-adb shell am start -n ro.tinulica.tvhome/.MainActivity \
-    --es plex_url 192.168.1.10:32400 --es plex_token <jeton>
+adb push setup.conf /sdcard/Android/data/ro.tinulica.tvhome/files/setup.conf
 ```
+
+> [!NOTE]
+> **Pourquoi un fichier et pas une commande ?** N'importe quelle appli installée sur la télé peut
+> envoyer une commande à l'écran d'accueil ; elle aurait pu remplacer l'adresse de ton serveur par
+> la sienne et récupérer ton jeton. Le dossier de l'appli, lui, n'est accessible qu'à `adb` et à
+> l'appli. La télé lit `setup.conf` au retour sur l'accueil, puis le supprime. Les jetons ne
+> partent jamais en clair sur Internet : une adresse `http://` n'est acceptée que sur ton réseau
+> local, sinon il faut `https://`.
 
 ### 🎙️ Micro
 

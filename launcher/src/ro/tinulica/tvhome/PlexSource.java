@@ -35,7 +35,8 @@ final class PlexSource {
 
     static boolean configured(Context context) {
         SharedPreferences p = prefs(context);
-        return !p.getString("plex_url", "").isEmpty() && !p.getString("plex_token", "").isEmpty();
+        return !p.getString("plex_url", "").isEmpty() && !p.getString("plex_token", "").isEmpty()
+                && LocalNet.safeForSecrets(base(p));   // the token never goes in clear over the internet
     }
 
     /** On Deck then recently added movies and shows; empty when not set up or unreachable. */

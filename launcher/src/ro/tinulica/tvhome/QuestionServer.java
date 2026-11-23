@@ -9,12 +9,18 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 /**
  * A tiny web page on the TV, open only while a question is waiting, so it can be answered from a
  * phone on the same Wi-Fi: the QR code on the card opens http://TV:8642/q/ID, which shows the
- * question and its choices; a choice is /a/ID/N. The ID is random, so only someone who sees the
- * TV's screen can answer.
+ * question and its choices; a choice is sent (POST) to /a/ID/N. The ID is random (48 bits), so
+ * only someone who sees the TV's screen can answer, and only the first answer counts.
+ *
+ * Hardened against the home network: a few connections at a time, a short request line, IDs
+ * checked, nothing but this page served, no outside resources (Content-Security-Policy).
  */
 final class QuestionServer {
 
@@ -34,7 +40,12 @@ final class QuestionServer {
         volatile String answer;
     }
 
+    private static final Pattern ID = Pattern.compile("[A-Za-z0-9_-]{8,64}");
+    private static final int MAX_LINE = 2048;
+
     private final Map<String, Question> open = new ConcurrentHashMap<>();
+    /** At most four phones at once; others wait (a flood cannot exhaust the TV). */
+    private final ExecutorService clients = Executors.newFixedThreadPool(4);
     private final Listener listener;
     private ServerSocket socket;
     private Thread thread;
@@ -44,6 +55,9 @@ final class QuestionServer {
     }
 
     synchronized void ask(Question q) {
+        if (q.id == null || !ID.matcher(q.id).matches()) {
+            return;   // no page for an id that could not be a link
+        }
         open.put(q.id, q);
         if (thread == null) {
             thread = new Thread(this::serve, "questions");
@@ -74,7 +88,11 @@ final class QuestionServer {
             }
             while (!s.isClosed()) {
                 final Socket client = s.accept();
-                new Thread(() -> handle(client), "question").start();
+                try {
+                    clients.execute(() -> handle(client));
+                } catch (RuntimeException e) {
+                    client.close();
+                }
             }
         } catch (Exception ignored) {
             // Closed: no question waiting any more.
@@ -88,31 +106,37 @@ final class QuestionServer {
         try (Socket c = client) {
             c.setSoTimeout(5000);
             BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
-            String line = in.readLine();
+            String line = readLine(in);
             if (line == null) {
                 return;
             }
             String[] parts = line.split(" ");
+            String method = parts[0];
             String path = parts.length > 1 ? parts[1] : "/";
             String[] p = path.split("/");
             String body;
             int status = 200;
-            if (p.length >= 3 && "q".equals(p[1]) && open.containsKey(p[2])) {
-                body = page(open.get(p[2]), null);
-            } else if (p.length >= 4 && "a".equals(p[1]) && open.containsKey(p[2])) {
-                Question q = open.get(p[2]);
+            Question q = p.length >= 3 && ID.matcher(p[2]).matches() ? open.get(p[2]) : null;
+            if (q != null && p.length == 3 && "q".equals(p[1]) && "GET".equals(method)) {
+                body = page(q, null);
+            } else if (q != null && p.length == 4 && "a".equals(p[1]) && "POST".equals(method)) {
                 int index = -1;
                 try {
                     index = Integer.parseInt(p[3]);
                 } catch (NumberFormatException ignored) {
                     // Not a number.
                 }
-                if (index >= 0 && index < q.options.size()) {
-                    String label = q.options.get(index);
-                    body = page(q, label);
+                String label = null;
+                synchronized (q) {
+                    // Only the first answer counts (from the remote or any phone).
+                    if (q.answer == null && index >= 0 && index < q.options.size()) {
+                        label = q.options.get(index);
+                        q.answer = label;
+                    }
+                }
+                body = page(q, null);
+                if (label != null) {
                     listener.answered(q.id, index, label);
-                } else {
-                    body = page(q, null);
                 }
             } else {
                 status = 404;
@@ -122,12 +146,32 @@ final class QuestionServer {
             OutputStream out = c.getOutputStream();
             out.write(("HTTP/1.1 " + status + (status == 200 ? " OK" : " Not Found") + "\r\n"
                     + "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n"
+                    + "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'\r\n"
+                    + "X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY\r\n"
                     + "Content-Length: " + bytes.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.UTF_8));
             out.write(bytes);
             out.flush();
         } catch (Exception ignored) {
             // The phone went away.
         }
+    }
+
+    /** The request line, at most MAX_LINE characters (a longer one is refused). */
+    private static String readLine(BufferedReader in) throws java.io.IOException {
+        StringBuilder b = new StringBuilder();
+        int ch;
+        while ((ch = in.read()) != -1) {
+            if (ch == '\n') {
+                break;
+            }
+            if (ch != '\r') {
+                b.append((char) ch);
+            }
+            if (b.length() > MAX_LINE) {
+                return null;
+            }
+        }
+        return ch == -1 && b.length() == 0 ? null : b.toString();
     }
 
     private static String page(Question q, String chosen) {
@@ -145,15 +189,16 @@ final class QuestionServer {
             b.append("<div class=done>✓ ").append(esc(answered)).append("</div><p class=muted>C'est fait. Tu peux fermer la page.</p>");
         } else {
             for (int i = 0; i < q.options.size(); i++) {
-                b.append("<a class=choice href=\"/a/").append(q.id).append('/').append(i).append("\">")
-                        .append(esc(q.options.get(i))).append("</a>");
+                // A form (POST): a link could be "answered" by a browser preloading it.
+                b.append("<form method=post action=\"/a/").append(esc(q.id)).append('/').append(i).append("\">")
+                        .append("<button class=choice>").append(esc(q.options.get(i))).append("</button></form>");
             }
         }
         return shell(b.toString());
     }
 
     private static String shell(String inner) {
-        return "<!doctype html><html lang=ro><head><meta charset=utf-8>"
+        return "<!doctype html><html lang=fr><head><meta charset=utf-8>"
                 + "<meta name=viewport content=\"width=device-width,initial-scale=1\"><title>TV Home</title><style>"
                 + "body{margin:0;min-height:100vh;background:#141417;color:#f4f1ee;font:16px/1.45 -apple-system,"
                 + "system-ui,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center}"
@@ -161,6 +206,7 @@ final class QuestionServer {
                 + ".from{color:#f0a58a;letter-spacing:.08em;text-transform:uppercase;font-size:13px;font-weight:600}"
                 + "h1{font-size:24px;line-height:1.25;margin:8px 0 10px}p{margin:0 0 12px;opacity:.92}"
                 + ".details{background:#1f1f23;border-radius:14px;padding:14px 16px;margin:6px 0 18px;opacity:.9;font-size:15px}"
+                + "form{margin:0}button.choice{width:100%;border:0;font-family:inherit;cursor:pointer}"
                 + ".choice{display:block;text-align:center;text-decoration:none;color:#141417;background:#f4f1ee;"
                 + "border-radius:14px;padding:15px;margin:10px 0;font-weight:600;font-size:17px}"
                 + ".choice:first-of-type{background:#d97757;color:#fff}"
@@ -172,6 +218,7 @@ final class QuestionServer {
         if (s == null) {
             return "";
         }
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }

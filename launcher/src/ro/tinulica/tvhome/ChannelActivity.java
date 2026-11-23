@@ -1706,7 +1706,8 @@ public final class ChannelActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
-        registerReceiver(dump, new android.content.IntentFilter("ro.tinulica.tvhome.DUMP_CHANNELS"));
+        registerReceiver(dump, new android.content.IntentFilter("ro.tinulica.tvhome.DUMP_CHANNELS"),
+                android.Manifest.permission.DUMP, null);   // adb only
     }
 
     @Override
